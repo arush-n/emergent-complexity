@@ -19,13 +19,27 @@ pip-wheel-metadata/
 
 # Generated experiment data and dense array exports
 artifacts/
+results/
+outputs/
+runs/
+reports/
 *.npy
 *.npz
+*.log
+*.tmp
+*.bak
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db
+*.db-*
 
 # Local configuration and credentials
 .env
 .env.*
 !.env.example
+.npmrc
+.pypirc
 *.pem
 *.key
 *.p12
