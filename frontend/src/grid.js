@@ -1,7 +1,13 @@
 export class GridCanvas {
   constructor(canvas, { onCommit } = {}) {
     this.canvas = canvas;
-    this.context = canvas.getContext("2d");
+    this.context = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    this.bitmapCanvas = document.createElement("canvas");
+    this.bitmapContext = this.bitmapCanvas.getContext("2d", { alpha: false });
+    this.bitmapData = null;
+    const endianProbe = new Uint8Array(new Uint32Array([0x0a0b0c0d]).buffer);
+    this.backgroundPixel = endianProbe[0] === 0x0d ? 0xff050505 : 0x050505ff;
+    this.alivePixel = endianProbe[0] === 0x0d ? 0xffe5eeee : 0xeeeee5ff;
     this.onCommit = onCommit || (() => {});
     this.grid = new Uint8Array();
     this.width = 0;
@@ -24,6 +30,11 @@ export class GridCanvas {
   setState(grid, width, height) {
     this.width = width;
     this.height = height;
+    if (this.bitmapCanvas.width !== width || this.bitmapCanvas.height !== height) {
+      this.bitmapCanvas.width = width;
+      this.bitmapCanvas.height = height;
+      this.bitmapData = null;
+    }
     if (grid instanceof Uint8Array) {
       this.grid = new Uint8Array(grid);
     } else {
@@ -73,19 +84,22 @@ export class GridCanvas {
     const offsetY = (cssHeight - cellSize * this.height) / 2;
     const context = this.context;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    context.fillStyle = "#050505";
-    context.fillRect(0, 0, cssWidth, cssHeight);
-
-    context.fillStyle = "#eeede5";
-    for (let row = 0; row < this.height; row += 1) {
-      for (let col = 0; col < this.width; col += 1) {
-        if (this.grid[row * this.width + col]) {
-          context.fillRect(offsetX + col * cellSize, offsetY + row * cellSize, cellSize, cellSize);
+    context.imageSmoothingEnabled = false;
+    const renderedBitmap = this.renderBitmap(context, offsetX, offsetY, cellSize);
+    if (!renderedBitmap) {
+      context.fillStyle = "#050505";
+      context.fillRect(0, 0, cssWidth, cssHeight);
+      context.fillStyle = "#eeede5";
+      for (let row = 0; row < this.height; row += 1) {
+        for (let col = 0; col < this.width; col += 1) {
+          if (this.grid[row * this.width + col]) {
+            context.fillRect(offsetX + col * cellSize, offsetY + row * cellSize, cellSize, cellSize);
+          }
         }
       }
     }
 
-    if (this.showGrid && cellSize >= 3) {
+    if (this.showGrid && cellSize >= 4) {
       context.beginPath();
       context.strokeStyle = "#252523";
       context.lineWidth = 1;
@@ -101,6 +115,31 @@ export class GridCanvas {
       }
       context.stroke();
     }
+  }
+
+  renderBitmap(context, offsetX, offsetY, cellSize) {
+    if (!this.bitmapContext) return false;
+    if (!this.bitmapData) {
+      this.bitmapData = this.bitmapContext.createImageData(this.width, this.height);
+    }
+    const pixels = new Uint32Array(this.bitmapData.data.buffer);
+    pixels.fill(this.backgroundPixel);
+    for (let index = 0; index < this.grid.length; index += 1) {
+      if (this.grid[index]) pixels[index] = this.alivePixel;
+    }
+    this.bitmapContext.putImageData(this.bitmapData, 0, 0);
+    context.drawImage(
+      this.bitmapCanvas,
+      0,
+      0,
+      this.width,
+      this.height,
+      offsetX,
+      offsetY,
+      cellSize * this.width,
+      cellSize * this.height,
+    );
+    return true;
   }
 
   cellAt(event) {

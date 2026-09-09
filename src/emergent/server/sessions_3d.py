@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..core.random import key_from_seed
-from ..core3d.measurements import alive_count_3d, alive_fraction_3d, transition_counts_3d
+from ..core3d.measurements import alive_count_3d, transition_counts_3d
 from ..core3d.random import random_grid_3d, random_rule_3d
 from ..core3d.rules import Rule3D, format_rule_3d, parse_rule_3d
 from ..core3d.simulate import (
@@ -291,7 +291,7 @@ class SessionStore3D(SessionLifecycle):
 
         session = self.get(session_id)
         alive = int(alive_count_3d(session.grid))
-        alive_fraction = float(alive_fraction_3d(session.grid))
+        alive_fraction = alive / session.total_cells
         response = {
             "session_id": session_id,
             "dimensions": 3,

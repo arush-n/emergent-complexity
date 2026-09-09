@@ -4,6 +4,8 @@ This repository is a small, reproducible cellular-automata laboratory. It provid
 
 It deliberately does not classify rules or implement research analysis, machine learning, complexity metrics, or automated searches.
 
+Live demo: <https://arush-n.github.io/emergent-complexity/>
+
 ## Install
 
 Python 3.12 is the deployment baseline. Python 3.11 through 3.14 are accepted
@@ -54,7 +56,9 @@ randomization, and export all go through the backend; the cellular-automaton
 transition itself remains in JAX. Playback speed and running state stay in the
 browser. 2D visible states use little-endian bit-packed binary render payloads;
 Three.js/WebGL receives compact unsigned-byte voxel triples, while exact
-cross-sections are requested separately from the server.
+cross-sections are requested separately from the server. Canvas uses a reusable
+pixel buffer, and the 3D view uses demand-driven low-power rendering with an
+adaptive voxel display cap.
 
 The Evolution Trace panel is a lightweight diagnostic view, not a research
 classifier. It plots the live-cell fraction and the fraction of cells changed

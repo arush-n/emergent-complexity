@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, getRenderVoxelLimit } from "./api.js";
 import { GridCanvas } from "./grid.js";
 import { ThreeVoxelView } from "./three_view.js";
 import { getSessionId } from "./session.js";
@@ -24,7 +24,7 @@ export class CompareController {
     this.playbackLastTime = 0;
     this.playbackBudget = 0;
     this.inFlight = false;
-    this.view = new ThreeVoxelView(byId("compare-3d-viewport"), { maxVoxels: 50000 });
+    this.view = new ThreeVoxelView(byId("compare-3d-viewport"), { maxVoxels: getRenderVoxelLimit() });
     this.grid = new GridCanvas(byId("compare-2d-canvas"), {
       onCommit: (grid) => {
         if (!this.state2d) return;

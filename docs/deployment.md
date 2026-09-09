@@ -1,5 +1,7 @@
 # Deployment
 
+Public frontend URL: <https://arush-n.github.io/emergent-complexity/>
+
 GitHub Pages serves the static frontend; it cannot run JAX or FastAPI. The
 included `render.yaml` deploys the backend container to Render, and
 `.github/workflows/pages.yml` publishes `frontend/` to Pages.

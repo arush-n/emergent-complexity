@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..core.grid import Grid, validate_dimensions
-from ..core.measurements import alive_count, alive_fraction, transition_counts
+from ..core.measurements import alive_count, transition_counts
 from ..core.random import key_from_seed, random_grid
 from ..core.random import random_rule as make_random_rule
 from ..core.rules import Rule, format_rule, parse_rule
@@ -331,6 +331,7 @@ class SessionStore(SessionLifecycle):
 
         session = self.get(session_id)
         total_cells = session.height * session.width
+        alive = int(alive_count(session.grid))
         response: dict[str, Any] = {
             "session_id": session_id,
             "rule": format_rule(session.rule),
@@ -339,8 +340,8 @@ class SessionStore(SessionLifecycle):
             "seed": session.seed,
             "initial_density": session.initial_density,
             "generation": session.generation,
-            "alive": int(alive_count(session.grid)),
-            "alive_fraction": float(alive_fraction(session.grid)),
+            "alive": alive,
+            "alive_fraction": alive / total_cells,
             "changed_cells": session.changed_cells,
             "changed_fraction": session.changed_cells / total_cells,
             "births": session.births,

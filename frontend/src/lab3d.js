@@ -1,5 +1,5 @@
-import { api } from "./api.js";
-import { renderMetricsChart } from "./chart.js";
+import { api, getRenderVoxelLimit } from "./api.js";
+import { scheduleMetricsChart } from "./chart.js";
 import { createRuleEditor } from "./controls.js";
 import { renderSlice } from "./slice.js";
 import { ThreeVoxelView } from "./three_view.js";
@@ -26,7 +26,7 @@ export class ThreeLabController {
     this.metricHistory = [];
     this.sliceToken = 0;
     this.MAX_METRIC_POINTS = 180;
-    this.view = new ThreeVoxelView(byId("viewport-3d"));
+    this.view = new ThreeVoxelView(byId("viewport-3d"), { maxVoxels: getRenderVoxelLimit() });
 
     this.ruleEditor = createRuleEditor(
       byId("3d-birth-toggles"),
@@ -142,7 +142,7 @@ export class ThreeLabController {
     if (this.metricHistory.length > this.MAX_METRIC_POINTS) {
       this.metricHistory = this.metricHistory.slice(-this.MAX_METRIC_POINTS);
     }
-    renderMetricsChart(byId("metrics-chart-3d"), this.metricHistory, state.width * state.height * state.depth);
+    scheduleMetricsChart(byId("metrics-chart-3d"), this.metricHistory, state.width * state.height * state.depth);
   }
 
   renderState(state) {

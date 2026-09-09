@@ -1,5 +1,14 @@
 const configuredBase = String(globalThis.EMERGENT_CONFIG?.apiBase || "").replace(/\/+$/, "");
 const API_ROOT = `${configuredBase}/api`;
+export const DEFAULT_MAX_RENDER_VOXELS = 75000;
+
+export function getRenderVoxelLimit() {
+  const memory = Number(globalThis.navigator?.deviceMemory);
+  const cores = Number(globalThis.navigator?.hardwareConcurrency);
+  if ((Number.isFinite(memory) && memory <= 2) || (Number.isFinite(cores) && cores <= 2)) return 25000;
+  if ((Number.isFinite(memory) && memory <= 4) || (Number.isFinite(cores) && cores <= 4)) return 50000;
+  return DEFAULT_MAX_RENDER_VOXELS;
+}
 
 async function responseError(response, fallback) {
   const contentType = response.headers.get("content-type") || "";
@@ -19,7 +28,7 @@ async function request(path, options = {}) {
 }
 
 async function binary(path) {
-  const response = await fetch(`${API_ROOT}${path}`);
+  const response = await fetch(`${API_ROOT}${path}`, { cache: "no-store" });
   if (!response.ok) throw await responseError(response, "Download failed");
   return response;
 }
@@ -60,7 +69,7 @@ async function hydrate2d(state) {
   };
 }
 
-async function hydrate3d(state, maxVoxels = 75000) {
+async function hydrate3d(state, maxVoxels = getRenderVoxelLimit()) {
   const response = await binary(`/3d/render${sessionQuery(state.session_id)}&max_voxels=${maxVoxels}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length % 3 !== 0) throw new Error("The 3D render payload is malformed.");
@@ -129,7 +138,7 @@ export const api = {
   createSession3d(config) {
     return request("/3d/session", { method: "POST", body: JSON.stringify(config) }).then(hydrate3d);
   },
-  state3d(sessionId, maxVoxels = 75000) {
+  state3d(sessionId, maxVoxels = getRenderVoxelLimit()) {
     return request(`/3d/state${sessionQuery(sessionId)}&max_voxels=${maxVoxels}`).then((state) => hydrate3d(state, maxVoxels));
   },
   reset3d(sessionId) {
@@ -168,7 +177,7 @@ export const api = {
   exportState3d(sessionId) {
     return download(`/3d/export${sessionQuery(sessionId)}`, "life-lab-3d-state.npz");
   },
-  exportView3d(sessionId, maxVoxels = 75000) {
+  exportView3d(sessionId, maxVoxels = getRenderVoxelLimit()) {
     return request(`/3d/export-view${sessionQuery(sessionId)}&max_voxels=${maxVoxels}`);
   },
   experiment3d(config) {

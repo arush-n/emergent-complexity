@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { renderMetricsChart } from "./chart.js";
+import { scheduleMetricsChart } from "./chart.js";
 import { createRuleEditor } from "./controls.js";
 import { GridCanvas } from "./grid.js";
 import { CompareController } from "./compare.js";
@@ -126,7 +126,7 @@ function updateMetricHistory(state) {
   for (const sample of metrics) appendMetricPoint(state, sample);
   appendMetricPoint(state, state);
   if (metricHistory.length > MAX_METRIC_POINTS) metricHistory = metricHistory.slice(-MAX_METRIC_POINTS);
-  renderMetricsChart(metricsChart, metricHistory, state.width * state.height);
+  scheduleMetricsChart(metricsChart, metricHistory, state.width * state.height);
 }
 
 function renderState(state) {

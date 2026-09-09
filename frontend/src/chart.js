@@ -4,6 +4,8 @@ const HEIGHT = 310;
 const PADDING = { right: 20, left: 48 };
 const POPULATION_PLOT = { top: 30, height: 96 };
 const EVENTS_PLOT = { top: 178, height: 92 };
+const CHART_UPDATE_INTERVAL_MS = 100;
+const chartSchedules = new WeakMap();
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -162,4 +164,24 @@ export function renderMetricsChart(svg, points, totalCells) {
     "font-size": 11,
     "text-anchor": "end",
   });
+}
+
+/** Coalesce diagnostic redraws so playback does not rebuild SVG on every frame. */
+export function scheduleMetricsChart(svg, points, totalCells) {
+  if (!svg) return;
+  let schedule = chartSchedules.get(svg);
+  if (!schedule) {
+    schedule = { lastRender: 0, timer: null, points: null, totalCells: 0 };
+    chartSchedules.set(svg, schedule);
+  }
+  schedule.points = points;
+  schedule.totalCells = totalCells;
+  if (schedule.timer !== null) return;
+  const elapsed = performance.now() - schedule.lastRender;
+  const delay = schedule.lastRender ? Math.max(0, CHART_UPDATE_INTERVAL_MS - elapsed) : 0;
+  schedule.timer = window.setTimeout(() => {
+    schedule.timer = null;
+    renderMetricsChart(svg, schedule.points || [], schedule.totalCells);
+    schedule.lastRender = performance.now();
+  }, delay);
 }

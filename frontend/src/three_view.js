@@ -57,8 +57,12 @@ export class ThreeVoxelView {
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color("#050505");
       this.camera = new THREE.PerspectiveCamera(48, 1, 0.1, 5000);
-      this.renderer = new THREE.WebGLRenderer({ antialias: true });
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this.renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        alpha: false,
+        powerPreference: "low-power",
+      });
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
       this.container.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
       this.container.appendChild(this.renderer.domElement);
@@ -192,9 +196,17 @@ export class ThreeVoxelView {
       const matrix = new this.THREE.Matrix4();
       this.mesh.count = count;
       for (let index = 0; index < count; index += 1) {
-        const [z, y, x] = voxels instanceof Uint8Array
-          ? [voxels[index * 3], voxels[index * 3 + 1], voxels[index * 3 + 2]]
-          : voxels[index];
+        let z;
+        let y;
+        let x;
+        if (voxels instanceof Uint8Array) {
+          const offset = index * 3;
+          z = voxels[offset];
+          y = voxels[offset + 1];
+          x = voxels[offset + 2];
+        } else {
+          [z, y, x] = voxels[index];
+        }
         matrix.setPosition(
           x - width / 2 + 0.5,
           height / 2 - y - 0.5,
@@ -229,10 +241,8 @@ export class ThreeVoxelView {
       voxelSize * 0.86,
       voxelSize * 0.86,
     );
-    this.voxelMaterial = new THREE.MeshStandardMaterial({
+    this.voxelMaterial = new THREE.MeshLambertMaterial({
       color: "#eeede5",
-      roughness: 0.78,
-      metalness: 0,
     });
     this.mesh = new THREE.InstancedMesh(this.voxelGeometry, this.voxelMaterial, capacity);
     this.mesh.count = 0;
