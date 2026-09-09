@@ -23,6 +23,7 @@ results/
 outputs/
 runs/
 reports/
+experiment.md
 *.npy
 *.npz
 *.log
