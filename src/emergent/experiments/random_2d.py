@@ -17,7 +17,7 @@ from ..core.rules import format_rule
 from ..core.simulate import run_steps_with_metrics
 
 
-def run_random_2d_experiment(
+def compute_random_2d_experiment(
     *,
     rules: int = 5,
     initial_conditions: int = 4,
@@ -25,9 +25,8 @@ def run_random_2d_experiment(
     steps: int = 50,
     density: float = 0.10,
     seed: int = 42,
-    output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Run a compact 2D sweep with the same raw row shape as the 3D runner."""
+    """Compute a compact 2D sweep without writing anything to disk."""
 
     if rules < 1 or initial_conditions < 1 or size < 1 or steps < 0:
         raise ValueError(
@@ -35,12 +34,6 @@ def run_random_2d_experiment(
         )
     if not 0.0 <= density <= 1.0:
         raise ValueError("density must be between 0 and 1")
-    if output_dir is None:
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        output = Path("artifacts/experiments") / f"random_2d_{stamp}"
-    else:
-        output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
     root_key = jax.random.key(seed)
     rule_key, grid_key = jax.random.split(root_key)
     sampled_rules = random_rules(rule_key, rules)
@@ -85,12 +78,57 @@ def run_random_2d_experiment(
         "device": str(jax.devices()[0]),
         "timestamp": datetime.now(UTC).isoformat(),
     }
+    return {"manifest": manifest, "rows": rows}
+
+
+def _output_directory(output_dir: str | Path | None) -> Path:
+    if output_dir is not None:
+        target = Path(output_dir)
+    else:
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        target = Path("artifacts/experiments") / f"random_2d_{stamp}"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def save_random_2d_experiment(
+    result: dict[str, Any],
+    output_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Persist a previously computed 2D experiment for CLI use."""
+
+    output = _output_directory(output_dir)
+    manifest = result["manifest"]
+    rows = result["rows"]
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     with (output / "results.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
         writer.writeheader()
         writer.writerows(rows)
-    return {"output_dir": str(output), "manifest": manifest, "rows": rows}
+    return {"output_dir": str(output), **result}
+
+
+def run_random_2d_experiment(
+    *,
+    rules: int = 5,
+    initial_conditions: int = 4,
+    size: int = 24,
+    steps: int = 50,
+    density: float = 0.10,
+    seed: int = 42,
+    output_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Compute a compact 2D sweep and write its CSV plus manifest files."""
+
+    result = compute_random_2d_experiment(
+        rules=rules,
+        initial_conditions=initial_conditions,
+        size=size,
+        steps=steps,
+        density=density,
+        seed=seed,
+    )
+    return save_random_2d_experiment(result, output_dir)
 
 
 def main() -> None:

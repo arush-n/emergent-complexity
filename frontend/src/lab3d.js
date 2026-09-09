@@ -3,6 +3,7 @@ import { renderMetricsChart } from "./chart.js";
 import { createRuleEditor } from "./controls.js";
 import { renderSlice } from "./slice.js";
 import { ThreeVoxelView } from "./three_view.js";
+import { getSessionId } from "./session.js";
 
 const byId = (id) => document.getElementById(id);
 
@@ -13,7 +14,7 @@ function numberValue(input, fallback) {
 
 export class ThreeLabController {
   constructor() {
-    this.sessionId = "3d-default";
+    this.sessionId = getSessionId("3d");
     this.currentState = null;
     this.active = false;
     this.initialized = false;
@@ -237,12 +238,19 @@ export class ThreeLabController {
     this.playbackLastTime = 0;
     this.playbackBudget = 0;
     byId("3d-play-button").disabled = false;
-    byId("3d-pause-button").disabled = true;
+    this.updatePlaybackButton();
     if (showStatus && wasPlaying) this.setStatus("Paused");
   }
 
+  updatePlaybackButton() {
+    const button = byId("3d-play-button");
+    button.textContent = this.playing ? "Ⅱ Pause" : "▶ Play";
+    button.setAttribute("aria-label", this.playing ? "Pause 3D simulation" : "Play 3D simulation");
+    button.setAttribute("aria-pressed", String(this.playing));
+  }
+
   async playbackTick(token) {
-    if (!this.playing || token !== this.playbackToken) return;
+    if (!this.playing || !this.active || token !== this.playbackToken) return;
     const now = performance.now();
     const elapsed = this.playbackLastTime ? Math.min(now - this.playbackLastTime, 250) : 0;
     this.playbackLastTime = now;
@@ -252,14 +260,14 @@ export class ThreeLabController {
       if (steps > 0) {
         this.playbackBudget -= steps;
         const state = await api.step3d(this.sessionId, steps, steps === 1);
-        if (this.playing && token === this.playbackToken) this.renderState(state);
+        if (this.playing && this.active && token === this.playbackToken) this.renderState(state);
       }
     } catch (error) {
       this.pause();
       this.setStatus(error.message, true);
       return;
     }
-    if (this.playing && token === this.playbackToken) {
+    if (this.playing && this.active && token === this.playbackToken) {
       window.setTimeout(() => this.playbackTick(token), 33);
     }
   }
@@ -271,8 +279,8 @@ export class ThreeLabController {
     this.playbackLastTime = performance.now();
     this.playbackBudget = 0;
     const token = this.playbackToken;
-    byId("3d-play-button").disabled = true;
-    byId("3d-pause-button").disabled = false;
+    byId("3d-play-button").disabled = false;
+    this.updatePlaybackButton();
     this.setStatus("Playing");
     this.playbackTick(token);
   }
@@ -294,9 +302,11 @@ export class ThreeLabController {
   }
 
   bindControls() {
-    byId("3d-play-button").addEventListener("click", () => this.play());
-    byId("3d-pause-button").addEventListener("click", () => this.pause());
-    byId("3d-pause-button").disabled = true;
+    byId("3d-play-button").addEventListener("click", () => {
+      if (this.playing) this.pause();
+      else this.play();
+    });
+    this.updatePlaybackButton();
     byId("3d-step-button").addEventListener("click", () => {
       this.pause();
       this.perform(() => api.step3d(this.sessionId, 1, true), "Advanced one generation");
@@ -347,7 +357,7 @@ export class ThreeLabController {
       this.pause();
       this.perform(
         async () => {
-          const state = await api.runUntilStable3d(this.sessionId, Math.trunc(numberValue(byId("3d-stability-limit"), 1000)));
+          const state = await api.runUntilStable3d(this.sessionId, Math.trunc(numberValue(byId("3d-stability-limit"), 100)));
           this.setStatus(state.settled ? `Fixed point reached after ${state.steps_run} generations` : `Stopped at ${state.steps_run}-generation limit`);
           return state;
         },
@@ -385,7 +395,7 @@ export class ThreeLabController {
     });
     byId("3d-capture-button").addEventListener("click", () => {
       if (!this.currentState) return;
-      this.view.capture(`3D | ${this.currentState.rule} | Generation ${this.currentState.generation} | ${this.currentState.depth}^3 | Seed ${this.currentState.seed}`);
+      this.view.capture(`3D | ${this.currentState.rule} | Generation ${this.currentState.generation} | ${this.currentState.depth} × ${this.currentState.height} × ${this.currentState.width} | Seed ${this.currentState.seed}`);
     });
     byId("3d-export-button").addEventListener("click", async () => {
       try {

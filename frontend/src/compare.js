@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { GridCanvas } from "./grid.js";
 import { ThreeVoxelView } from "./three_view.js";
+import { getSessionId } from "./session.js";
 
 const byId = (id) => document.getElementById(id);
 
@@ -11,8 +12,8 @@ function numberValue(id, fallback) {
 
 export class CompareController {
   constructor() {
-    this.session2d = "compare-2d";
-    this.session3d = "compare-3d";
+    this.session2d = getSessionId("compare-2d");
+    this.session3d = getSessionId("compare-3d");
     this.state2d = null;
     this.state3d = null;
     this.initialized = false;
@@ -121,8 +122,8 @@ export class CompareController {
     this.playbackLastTime = performance.now();
     this.playbackBudget = 0;
     const token = this.playbackToken;
-    byId("compare-play").disabled = true;
-    byId("compare-pause").disabled = false;
+    byId("compare-play").disabled = false;
+    this.updatePlaybackButton();
     this.setStatus("Playing both systems");
     this.playbackTick(token);
   }
@@ -155,13 +156,22 @@ export class CompareController {
     if (this.timer) window.clearTimeout(this.timer);
     this.timer = null;
     byId("compare-play").disabled = false;
-    byId("compare-pause").disabled = true;
+    this.updatePlaybackButton();
+  }
+
+  updatePlaybackButton() {
+    const button = byId("compare-play");
+    button.textContent = this.playing ? "Ⅱ Pause both" : "▶ Play both";
+    button.setAttribute("aria-label", this.playing ? "Pause both simulations" : "Play both simulations");
+    button.setAttribute("aria-pressed", String(this.playing));
   }
 
   bindControls() {
     byId("compare-step").addEventListener("click", () => this.stepBoth());
-    byId("compare-play").addEventListener("click", () => this.start());
-    byId("compare-pause").addEventListener("click", () => this.stop());
+    byId("compare-play").addEventListener("click", () => {
+      if (this.playing) this.stop();
+      else this.start();
+    });
     byId("compare-randomize").addEventListener("click", async () => {
       this.stop();
       try {
@@ -201,6 +211,6 @@ export class CompareController {
       try { this.render3d(await api.setRule3d(this.session3d, event.target.value)); } catch (error) { this.setStatus(error.message, true); }
     });
     byId("compare-speed").addEventListener("input", (event) => { byId("compare-speed-value").textContent = `${Number(event.target.value).toFixed(0)} gen/s`; });
-    byId("compare-pause").disabled = true;
+    this.updatePlaybackButton();
   }
 }

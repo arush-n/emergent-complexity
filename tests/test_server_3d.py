@@ -88,13 +88,14 @@ def test_api_3d_experiment_endpoint_returns_raw_rows(tmp_path) -> None:
             "steps": 1,
             "density": 0,
             "seed": 5,
-            "output_dir": str(tmp_path),
         },
     )
     assert response.status_code == 200
     body = response.json()
     assert len(body["rows"]) == 1
     assert body["manifest"]["dimensions"] == 3
+    assert "output_dir" not in body
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_api_experiment_endpoint_rejects_browser_workloads_that_are_too_large() -> None:
@@ -112,6 +113,35 @@ def test_api_experiment_endpoint_rejects_browser_workloads_that_are_too_large() 
     )
     assert response.status_code == 400
     assert "Use the CLI experiment runner" in response.json()["detail"]
+
+
+def test_api_3d_rejects_oversized_step_and_stability_requests() -> None:
+    store_3d = SessionStore3D()
+    client = TestClient(create_app(SessionStore(), store_3d))
+    created = client.post(
+        "/api/3d/session",
+        json={
+            "session_id": "large-3d",
+            "depth": 32,
+            "height": 32,
+            "width": 32,
+            "density": 0,
+            "seed": 1,
+            "rule": "B1/S",
+        },
+    )
+    assert created.status_code == 200
+
+    step = client.post("/api/3d/step", json={"session_id": "large-3d", "steps": 5_000})
+    assert step.status_code == 400
+    assert "interactive server" in step.json()["detail"]
+
+    stability = client.post(
+        "/api/3d/run-until-stable",
+        json={"session_id": "large-3d", "max_steps": 5_000},
+    )
+    assert stability.status_code == 400
+    assert "interactive server" in stability.json()["detail"]
 
 
 def test_api_3d_slices_are_exact_for_all_axes_and_transfer_only_a_plane(monkeypatch) -> None:

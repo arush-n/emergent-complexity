@@ -81,3 +81,56 @@ def test_api_session_lifecycle() -> None:
     assert stabilized.json()["settled"] is True
     assert stabilized.json()["steps_run"] == 2
     assert stabilized.json()["alive"] == 0
+
+
+def test_api_rejects_oversized_step_and_stability_requests() -> None:
+    client = TestClient(create_app(SessionStore()))
+    created = client.post(
+        "/api/session",
+        json={"session_id": "large", "width": 128, "height": 128, "density": 0},
+    )
+    assert created.status_code == 200
+
+    step = client.post("/api/step", json={"session_id": "large", "steps": 100_000})
+    assert step.status_code == 400
+    assert "interactive server" in step.json()["detail"]
+
+    stability = client.post(
+        "/api/run-until-stable",
+        json={"session_id": "large", "max_steps": 100_000},
+    )
+    assert stability.status_code == 400
+    assert "interactive server" in stability.json()["detail"]
+
+
+def test_api_does_not_enable_wildcard_cors() -> None:
+    client = TestClient(create_app(SessionStore()))
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "https://example.test",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_api_2d_experiment_computes_without_writing_files(tmp_path) -> None:
+    client = TestClient(create_app(SessionStore()))
+    response = client.post(
+        "/api/experiments/2d",
+        json={
+            "rules": 1,
+            "initial_conditions": 1,
+            "size": 8,
+            "steps": 1,
+            "density": 0,
+            "seed": 5,
+            "output_dir": str(tmp_path),
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["rows"]) == 1
+    assert "output_dir" not in body
+    assert list(tmp_path.iterdir()) == []

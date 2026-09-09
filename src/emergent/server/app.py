@@ -9,11 +9,15 @@ from typing import Any
 
 import jax
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from ..experiments.workload import BROWSER_MAX_CELL_UPDATES, validate_browser_workload
+from ..experiments.workload import (
+    BROWSER_MAX_CELL_UPDATES,
+    INTERACTIVE_MAX_CELL_UPDATES,
+    validate_browser_workload,
+    validate_interactive_workload,
+)
 from .models import (
     ActionRequest,
     Experiment2DRequest,
@@ -63,13 +67,6 @@ def create_app(
         description="A thin HTTP layer over a JAX cellular-automata engine.",
         lifespan=lifespan,
     )
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     @application.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "jax_device": str(jax.devices()[0])}
@@ -134,6 +131,12 @@ def create_app(
     def step(payload: StepRequest | None = Body(default=None)) -> dict[str, Any]:
         request = payload or StepRequest()
         try:
+            session = session_store.get(request.session_id)
+            validate_interactive_workload(
+                dimensions=2,
+                total_cells=session.height * session.width,
+                steps=request.steps,
+            )
             metrics = session_store.step(
                 request.session_id,
                 steps=request.steps,
@@ -162,6 +165,12 @@ def create_app(
     def run_until_stable(payload: StabilityRequest | None = Body(default=None)) -> dict[str, Any]:
         request = payload or StabilityRequest()
         try:
+            session = session_store.get(request.session_id)
+            validate_interactive_workload(
+                dimensions=2,
+                total_cells=session.height * session.width,
+                steps=request.max_steps,
+            )
             steps_run, settled = session_store.run_until_stable(
                 request.session_id,
                 max_steps=request.max_steps,
@@ -284,6 +293,12 @@ def create_app(
         request = payload or StepRequest()
         identifier = request.session_id if payload else "3d-default"
         try:
+            session = session_store_3d.get(identifier)
+            validate_interactive_workload(
+                dimensions=3,
+                total_cells=session.total_cells,
+                steps=request.steps,
+            )
             metrics = session_store_3d.step(
                 identifier,
                 steps=request.steps,
@@ -325,6 +340,12 @@ def create_app(
         request = payload or StabilityRequest()
         identifier = request.session_id if payload else "3d-default"
         try:
+            session = session_store_3d.get(identifier)
+            validate_interactive_workload(
+                dimensions=3,
+                total_cells=session.total_cells,
+                steps=request.max_steps,
+            )
             steps_run, settled = session_store_3d.run_until_stable(
                 identifier,
                 max_steps=request.max_steps,
@@ -398,7 +419,7 @@ def create_app(
 
     @application.post("/api/experiments/3d")
     def experiment_3d(payload: Experiment3DRequest) -> dict[str, Any]:
-        from ..experiments.random_3d import run_random_3d_experiment
+        from ..experiments.random_3d import compute_random_3d_experiment
 
         try:
             validate_browser_workload(
@@ -408,21 +429,20 @@ def create_app(
                 size=payload.size,
                 steps=payload.steps,
             )
-            return run_random_3d_experiment(
+            return compute_random_3d_experiment(
                 rules=payload.rules,
                 initial_conditions=payload.initial_conditions,
                 size=payload.size,
                 steps=payload.steps,
                 density=payload.density,
                 seed=payload.seed,
-                output_dir=payload.output_dir,
             )
-        except (TypeError, ValueError, OSError) as exc:
+        except (TypeError, ValueError) as exc:
             raise _bad_request(exc) from exc
 
     @application.post("/api/experiments/2d")
     def experiment_2d(payload: Experiment2DRequest) -> dict[str, Any]:
-        from ..experiments.random_2d import run_random_2d_experiment
+        from ..experiments.random_2d import compute_random_2d_experiment
 
         try:
             validate_browser_workload(
@@ -432,21 +452,23 @@ def create_app(
                 size=payload.size,
                 steps=payload.steps,
             )
-            return run_random_2d_experiment(
+            return compute_random_2d_experiment(
                 rules=payload.rules,
                 initial_conditions=payload.initial_conditions,
                 size=payload.size,
                 steps=payload.steps,
                 density=payload.density,
                 seed=payload.seed,
-                output_dir=payload.output_dir,
             )
-        except (TypeError, ValueError, OSError) as exc:
+        except (TypeError, ValueError) as exc:
             raise _bad_request(exc) from exc
 
     @application.get("/api/experiments/limits")
     def experiment_limits() -> dict[str, int]:
-        return {"browser_max_cell_updates": BROWSER_MAX_CELL_UPDATES}
+        return {
+            "browser_max_cell_updates": BROWSER_MAX_CELL_UPDATES,
+            "interactive_max_cell_updates": INTERACTIVE_MAX_CELL_UPDATES,
+        }
 
     if FRONTEND_DIR.exists():
         application.mount(

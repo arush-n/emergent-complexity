@@ -5,6 +5,8 @@ from __future__ import annotations
 import operator
 
 BROWSER_MAX_CELL_UPDATES = 100_000_000
+INTERACTIVE_MAX_CELL_UPDATES = BROWSER_MAX_CELL_UPDATES
+NEIGHBOR_COUNTS = {2: 8, 3: 26}
 
 
 def _integer(value: int, name: str, *, minimum: int = 0) -> int:
@@ -63,3 +65,61 @@ def validate_browser_workload(
             "Use the CLI experiment runner for large sweeps."
         )
     return work
+
+
+def estimate_interactive_cell_updates(
+    *,
+    dimensions: int,
+    total_cells: int,
+    steps: int,
+) -> int:
+    """Estimate neighbor evaluations for one interactive simulation request."""
+
+    dimension_count = _integer(dimensions, "dimensions", minimum=1)
+    try:
+        neighbor_count = NEIGHBOR_COUNTS[dimension_count]
+    except KeyError as exc:
+        raise ValueError("dimensions must be 2 or 3") from exc
+    cell_count = _integer(total_cells, "total_cells", minimum=1)
+    step_count = _integer(steps, "steps")
+    return cell_count * step_count * neighbor_count
+
+
+def validate_interactive_workload(
+    *,
+    dimensions: int,
+    total_cells: int,
+    steps: int,
+    limit: int = INTERACTIVE_MAX_CELL_UPDATES,
+) -> int:
+    """Reject oversized synchronous step/stability requests."""
+
+    maximum = _integer(limit, "limit", minimum=1)
+    work = estimate_interactive_cell_updates(
+        dimensions=dimensions,
+        total_cells=total_cells,
+        steps=steps,
+    )
+    if work > maximum:
+        raise ValueError(
+            "This request is too large for the interactive server. "
+            f"Estimated work: {work:,} neighbor-evaluations; "
+            f"interactive limit: {maximum:,}."
+        )
+    return work
+
+
+def validate_interactive_steps(
+    total_cells: int,
+    steps: int,
+    dimensions: int,
+    limit: int = INTERACTIVE_MAX_CELL_UPDATES,
+) -> int:
+    """Compatibility wrapper for validating one interactive step budget."""
+
+    return validate_interactive_workload(
+        dimensions=dimensions,
+        total_cells=total_cells,
+        steps=steps,
+        limit=limit,
+    )

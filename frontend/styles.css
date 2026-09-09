@@ -617,8 +617,19 @@ output {
 }
 
 .viewport-toolbar {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  right: 10px;
+  max-width: calc(100% - 20px);
   min-height: 38px;
   padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  background: rgba(17, 17, 16, 0.94);
+}
+
+.viewport-toolbar .check-control {
+  font-size: 11px;
 }
 
 .performance-overlay {

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -48,10 +50,60 @@ class SimulationSession:
 
 
 class SessionStore:
-    """A deliberately small in-memory store; one process is enough for this lab."""
+    """A bounded, expiring in-memory store for one server process."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_sessions: int = 256,
+        session_ttl_seconds: float = 3600.0,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        if max_sessions < 1:
+            raise ValueError("max_sessions must be positive")
+        if session_ttl_seconds <= 0:
+            raise ValueError("session_ttl_seconds must be positive")
         self._sessions: dict[str, SimulationSession] = {}
+        self._last_access: dict[str, float] = {}
+        self._max_sessions = max_sessions
+        self._session_ttl_seconds = float(session_ttl_seconds)
+        self._clock = clock
+
+    @property
+    def session_count(self) -> int:
+        """Return the number of sessions currently retained by the store."""
+
+        self._prune()
+        return len(self._sessions)
+
+    def _remove(self, identifier: str) -> None:
+        self._sessions.pop(identifier, None)
+        self._last_access.pop(identifier, None)
+
+    def _prune(self, *, protected_id: str | None = None) -> None:
+        now = self._clock()
+        expired = [
+            identifier
+            for identifier, last_access in self._last_access.items()
+            if now - last_access >= self._session_ttl_seconds
+        ]
+        for identifier in expired:
+            self._remove(identifier)
+
+        overflow = len(self._sessions) - self._max_sessions
+        if overflow <= 0:
+            return
+        candidates = [
+            identifier
+            for identifier in self._sessions
+            if identifier != protected_id
+        ]
+        candidates.sort(key=lambda identifier: self._last_access.get(identifier, 0.0))
+        for identifier in candidates[:overflow]:
+            self._remove(identifier)
+
+    def _touch(self, identifier: str) -> None:
+        self._last_access[identifier] = self._clock()
 
     def create(
         self,
@@ -77,11 +129,14 @@ class SessionStore:
             seed=seed,
             density=float(density),
         )
+        self._touch(identifier)
+        self._prune(protected_id=identifier)
         return identifier
 
     def ensure_default(self) -> str:
         """Create the default session on first API access."""
 
+        self._prune()
         if "default" not in self._sessions:
             self.create(
                 width=128,
@@ -91,17 +146,21 @@ class SessionStore:
                 rule="B3/S23",
                 session_id="default",
             )
+        self._touch("default")
         return "default"
 
     def get(self, session_id: str = "default") -> SimulationSession:
         """Return a session or raise ``KeyError`` if it does not exist."""
 
+        self._prune()
         if session_id == "default" and session_id not in self._sessions:
             self.ensure_default()
         try:
-            return self._sessions[session_id]
+            session = self._sessions[session_id]
         except KeyError as exc:
             raise KeyError(f"unknown session: {session_id}") from exc
+        self._touch(session_id)
+        return session
 
     def reset(self, session_id: str = "default") -> SimulationSession:
         """Restore the most recent initial grid and generation zero."""

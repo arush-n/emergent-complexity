@@ -198,11 +198,10 @@ print(trajectory.shape)  # (11, 32, 32, 32)
 
 For only the endpoint, use `run_steps_3d`. For many initial states, use `run_steps_batch_3d` with `(batch, depth, height, width)` input. `generate_batched_trajectory_3d` returns `(batch, time, depth, height, width)` and supports `record_every` so full 3D histories are only retained when explicitly requested. `simulate_rules_3d` returns `(rule, batch, depth, height, width)` final states.
 
-Legacy single-digit compact sections such as `B6/S567` remain accepted. A
-two-digit compact section such as `B10/S10` is accepted only when it is one
-complete count; use commas whenever a section contains multiple two-digit
-counts. Formatters always return comma-separated notation. 3D rules have 54
-independent decisions and can be encoded with
+For 3D rules, a single count may be written as an integer, but multiple counts
+must be comma-separated: `B6/S5,6,7` is valid, while `B6/S567` is rejected.
+Thus `S23` means exactly 23 neighbors, not counts 2 and 3. Formatters always
+return comma-separated notation. 3D rules have 54 independent decisions and can be encoded with
 `rule_to_int_3d`/`int_to_rule_3d` in `[0, 2**54)`. `random_rule_3d` and
 `random_rules_3d` use explicit JAX keys and never enumerate that space.
 
@@ -303,8 +302,10 @@ states. `save_grid`/`load_grid` support standalone `.npy` and `.npz` grids.
 
 ## Known limitations
 
-The server uses in-memory single-process session stores. It has no
-authentication, database, distributed execution, or multi-user coordination.
+The server uses bounded, expiring in-memory session stores. It has no
+authentication, database, distributed execution, or multi-process coordination;
+browser tabs receive separate session IDs, but sessions are not shared across
+server instances.
 3D browser rendering transmits living coordinates and explicitly samples only
 the visualization when a configurable cap is exceeded; JAX continues
 simulating the complete grid. A fresh shape intentionally creates a new

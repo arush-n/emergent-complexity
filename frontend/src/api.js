@@ -65,7 +65,7 @@ export const api = {
   setRule(sessionId, rule) {
     return request("/rule", { method: "POST", body: JSON.stringify({ session_id: sessionId, rule }) });
   },
-  runUntilStable(sessionId, maxSteps = 10000) {
+  runUntilStable(sessionId, maxSteps = 100) {
     return request("/run-until-stable", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, max_steps: maxSteps }),
@@ -116,7 +116,7 @@ export const api = {
   randomRule3d(sessionId, seed = null) {
     return request("/3d/random-rule", { method: "POST", body: JSON.stringify({ session_id: sessionId, seed }) });
   },
-  runUntilStable3d(sessionId, maxSteps = 1000) {
+  runUntilStable3d(sessionId, maxSteps = 100) {
     return request("/3d/run-until-stable", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, max_steps: maxSteps }),
@@ -139,5 +139,8 @@ export const api = {
   },
   experiment2d(config) {
     return request("/experiments/2d", { method: "POST", body: JSON.stringify(config) });
+  },
+  experimentLimits() {
+    return request("/experiments/limits");
   },
 };

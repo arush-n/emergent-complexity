@@ -11,7 +11,7 @@ from emergent.core3d.rules import (
 
 
 def test_parse_and_format_3d_rule() -> None:
-    rule = parse_rule_3d(" B6/S567 ")
+    rule = parse_rule_3d(" B6/S5,6,7 ")
     assert format_rule_3d(rule) == "B6/S5,6,7"
     assert rule.birth[6]
     assert rule.survival[5:8] == (True, True, True)
@@ -20,7 +20,7 @@ def test_parse_and_format_3d_rule() -> None:
     assert survival.shape == (27,)
 
 
-def test_parse_canonical_and_legacy_3d_notation() -> None:
+def test_parse_canonical_3d_notation() -> None:
     assert format_rule_3d(parse_rule_3d("B6/S5,6,7")) == "B6/S5,6,7"
     assert format_rule_3d(parse_rule_3d("B/S")) == "B/S"
     assert format_rule_3d(parse_rule_3d("B1/S2,3")) == "B1/S2,3"
@@ -30,8 +30,12 @@ def test_parse_canonical_and_legacy_3d_notation() -> None:
     assert format_rule_3d(parse_rule_3d("B10,11/S9,10,11")) == "B10,11/S9,10,11"
 
 
-def test_compact_3d_sequences_do_not_use_adjacent_digit_heuristics() -> None:
-    assert format_rule_3d(parse_rule_3d("B1/S234")) == "B1/S2,3,4"
+def test_multiple_3d_counts_require_commas() -> None:
+    assert format_rule_3d(parse_rule_3d("B1/S23")) == "B1/S23"
+    with pytest.raises(ValueError, match="comma-separated"):
+        parse_rule_3d("B1/S234")
+    with pytest.raises(ValueError, match="comma-separated"):
+        parse_rule_3d("B6/S567")
     with pytest.raises(ValueError):
         parse_rule_3d("B1011/S")
     with pytest.raises(ValueError):

@@ -43,7 +43,7 @@ def _output_directory(output_dir: str | Path | None) -> Path:
     return target
 
 
-def run_random_3d_experiment(
+def compute_random_3d_experiment(
     *,
     rules: int = 100,
     initial_conditions: int = 20,
@@ -51,10 +51,9 @@ def run_random_3d_experiment(
     steps: int = 500,
     density: float = 0.10,
     seed: int = 42,
-    output_dir: str | Path | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """Run a batched 3D random-rule sweep and write CSV plus manifest files.
+    """Compute a batched 3D random-rule sweep without writing to disk.
 
     Each rule is evaluated on one JAX batch containing all requested initial
     conditions. Only final grids and compact transition metrics are retained;
@@ -68,7 +67,6 @@ def run_random_3d_experiment(
     if not 0.0 <= density <= 1.0:
         raise ValueError("density must be between 0 and 1")
 
-    output = _output_directory(output_dir)
     root_key = jax.random.key(seed)
     rule_key, grid_key = jax.random.split(root_key)
     sampled_rules = random_rules_3d(rule_key, rules)
@@ -141,12 +139,49 @@ def run_random_3d_experiment(
         "dtype": "uint8",
         "timestamp": timestamp,
     }
+    return {"manifest": manifest, "rows": rows}
+
+
+def save_random_3d_experiment(
+    result: dict[str, Any],
+    output_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Persist a previously computed 3D experiment for CLI use."""
+
+    output = _output_directory(output_dir)
+    manifest = result["manifest"]
+    rows = result["rows"]
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     with (output / "results.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=RESULT_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
-    return {"output_dir": str(output), "manifest": manifest, "rows": rows}
+    return {"output_dir": str(output), **result}
+
+
+def run_random_3d_experiment(
+    *,
+    rules: int = 100,
+    initial_conditions: int = 20,
+    size: int = 64,
+    steps: int = 500,
+    density: float = 0.10,
+    seed: int = 42,
+    output_dir: str | Path | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
+    """Compute a 3D sweep and write its CSV plus manifest files."""
+
+    result = compute_random_3d_experiment(
+        rules=rules,
+        initial_conditions=initial_conditions,
+        size=size,
+        steps=steps,
+        density=density,
+        seed=seed,
+        progress=progress,
+    )
+    return save_random_3d_experiment(result, output_dir)
 
 
 def main() -> None:

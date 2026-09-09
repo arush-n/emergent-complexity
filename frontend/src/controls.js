@@ -65,9 +65,10 @@ export function createRuleEditor(
         let counts;
         if (!separator) counts = [...text].map(Number);
         else if (text.includes(",")) counts = text.split(",").map(Number);
-        else if (text.length === 2 && Number(text) >= 10 && Number(text) <= maxCount) counts = [Number(text)];
-        else if (text.length === 2) throw new Error(`Two-digit counts must be between 10 and ${maxCount} or comma-separated.`);
-        else counts = [...text].map(Number);
+        else {
+          if (text.length > 2) throw new Error("Multiple 3D counts must be comma-separated.");
+          counts = [Number(text)];
+        }
         if (
           counts.some((count) => !Number.isInteger(count) || count < 0 || count > maxCount) ||
           new Set(counts).size !== counts.length

@@ -38,6 +38,9 @@ def run_smoke(url: str, *, headed: bool = False) -> None:
         page.goto(url, wait_until="domcontentloaded")
 
         page.locator('[data-testid="ca-canvas"]').wait_for(state="visible")
+        page.wait_for_function(
+            "() => document.getElementById('status-message').textContent.includes('Ready -')"
+        )
         page.locator('[data-testid="step-button"]').click()
         wait_for_generation(page, "generation-value", 1)
         page.locator("#rule-text").fill("B36/S23")
@@ -46,6 +49,17 @@ def run_smoke(url: str, *, headed: bool = False) -> None:
             "() => document.getElementById('rule-display').textContent === 'B36/S23'"
         )
         assert page.locator("#rule-display").inner_text() == "B36/S23"
+
+        generation_before_playback = int(page.locator("#generation-value").inner_text())
+        page.locator('[data-testid="play-button"]').click()
+        wait_for_generation(page, "generation-value", generation_before_playback + 1)
+        page.locator('[data-mode="3d"]').click()
+        page.locator('[id="viewport-3d"] canvas').wait_for(state="visible")
+        page.wait_for_timeout(250)
+        page.locator('[data-mode="2d"]').click()
+        paused_generation = int(page.locator("#generation-value").inner_text())
+        page.wait_for_timeout(300)
+        assert int(page.locator("#generation-value").inner_text()) == paused_generation
 
         page.locator('[data-mode="3d"]').click()
         page.locator('[id="viewport-3d"] canvas').wait_for(state="visible")

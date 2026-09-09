@@ -34,7 +34,7 @@ class StepRequest(ActionRequest):
 
 
 class StabilityRequest(ActionRequest):
-    max_steps: int = Field(default=10_000, ge=0, le=100_000)
+    max_steps: int = Field(default=100, ge=0, le=100_000)
 
 
 class RandomizeRequest(ActionRequest):
@@ -69,7 +69,6 @@ class Experiment3DRequest(BaseModel):
     steps: int = Field(default=50, ge=0, le=2_000)
     density: float = Field(default=0.10, ge=0.0, le=1.0)
     seed: int = 42
-    output_dir: str | None = None
 
 
 class Experiment2DRequest(BaseModel):
@@ -79,4 +78,3 @@ class Experiment2DRequest(BaseModel):
     steps: int = Field(default=50, ge=0, le=2_000)
     density: float = Field(default=0.10, ge=0.0, le=1.0)
     seed: int = 42
-    output_dir: str | None = None

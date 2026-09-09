@@ -5,6 +5,7 @@ import { GridCanvas } from "./grid.js";
 import { CompareController } from "./compare.js";
 import { ExperimentController } from "./experiments.js";
 import { ThreeLabController } from "./lab3d.js";
+import { getSessionId } from "./session.js";
 
 const byId = (id) => document.getElementById(id);
 const canvas = byId("ca-canvas");
@@ -31,7 +32,7 @@ const metadataDensity = byId("metadata-density");
 const metricsChart = byId("metrics-chart");
 
 let currentState = null;
-let sessionId = "default";
+let sessionId = getSessionId("2d");
 let playing = false;
 let playbackToken = 0;
 let editQueue = Promise.resolve();
@@ -181,12 +182,20 @@ function pause() {
   playbackLastTime = 0;
   playbackBudget = 0;
   byId("play-button").disabled = false;
-  byId("pause-button").disabled = true;
+  updatePlaybackButton();
   if (wasPlaying) setStatus("Paused");
 }
 
+function updatePlaybackButton() {
+  const button = byId("play-button");
+  const running = playing;
+  button.textContent = running ? "Ⅱ Pause" : "▶ Play";
+  button.setAttribute("aria-label", running ? "Pause 2D simulation" : "Play 2D simulation");
+  button.setAttribute("aria-pressed", String(running));
+}
+
 async function playbackTick(token) {
-  if (!playing || token !== playbackToken) return;
+  if (!playing || token !== playbackToken || activeMode !== "2d") return;
   const now = performance.now();
   const elapsed = playbackLastTime ? Math.min(now - playbackLastTime, 250) : 0;
   playbackLastTime = now;
@@ -197,14 +206,14 @@ async function playbackTick(token) {
       playbackBudget -= steps;
       const collectMetrics = steps === 1;
       const state = await api.step(sessionId, steps, collectMetrics);
-      if (playing && token === playbackToken) renderState(state);
+      if (playing && token === playbackToken && activeMode === "2d") renderState(state);
     }
   } catch (error) {
     pause();
     setStatus(error.message, true);
     return;
   }
-  if (playing && token === playbackToken) {
+  if (playing && token === playbackToken && activeMode === "2d") {
     window.setTimeout(() => playbackTick(token), PLAYBACK_INTERVAL_MS);
   }
 }
@@ -216,10 +225,15 @@ function play() {
   playbackLastTime = performance.now();
   playbackBudget = 0;
   const token = playbackToken;
-  byId("play-button").disabled = true;
-  byId("pause-button").disabled = false;
+  byId("play-button").disabled = false;
+  updatePlaybackButton();
   setStatus("Playing");
   playbackTick(token);
+}
+
+function togglePlayback() {
+  if (playing) pause();
+  else play();
 }
 
 function downloadJson(state) {
@@ -276,9 +290,8 @@ async function importJson(file) {
   setStatus("Loaded saved state");
 }
 
-byId("play-button").addEventListener("click", play);
-byId("pause-button").addEventListener("click", pause);
-byId("pause-button").disabled = true;
+byId("play-button").addEventListener("click", togglePlayback);
+updatePlaybackButton();
 byId("step-button").addEventListener("click", () => {
   pause();
   perform(() => api.step(sessionId), "Advanced one generation");
@@ -294,7 +307,7 @@ byId("clear-button").addEventListener("click", () => {
 byId("stabilize-button").addEventListener("click", async () => {
   pause();
   try {
-    const maxSteps = Math.trunc(numberValue(stabilityLimitInput, 10000));
+    const maxSteps = Math.trunc(numberValue(stabilityLimitInput, 100));
     const state = await api.runUntilStable(sessionId, maxSteps);
     renderState(state);
     const result = state.settled ? "Fixed point reached" : "Stopped at the safety limit";
@@ -370,7 +383,7 @@ byId("load-input").addEventListener("change", async (event) => {
 async function boot() {
   try {
     const state = await api.createSession({
-      session_id: "default",
+      session_id: sessionId,
       width: 128,
       height: 128,
       density: 0,
@@ -383,7 +396,7 @@ async function boot() {
     // controls fully deterministic for research runs.
     const glider = state.grid.map((row) => row.slice());
     [[1, 2], [2, 3], [3, 1], [3, 2], [3, 3]].forEach(([row, column]) => { glider[row + 1][column + 1] = 1; });
-    const initial = await api.updateState("default", glider, 0);
+    const initial = await api.updateState(sessionId, glider, 0);
     renderState(initial);
     setStatus("Ready - draw cells or press Randomize");
     api.health().then((health) => {
@@ -397,6 +410,7 @@ async function boot() {
 boot();
 
 function setMode(mode) {
+  if (activeMode === "2d" && mode !== "2d") pause();
   activeMode = mode;
   document.querySelectorAll(".mode-link").forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode);

@@ -49,6 +49,18 @@ RESULT_FIELDS = (
 )
 
 
+def benchmark_sizes(max_size: int) -> tuple[int, ...]:
+    """Return the standard sizes plus progressively larger requested sizes."""
+
+    if max_size < 1:
+        raise ValueError("max_size must be positive")
+    sizes = {size for size in SIZES if size <= max_size}
+    if max_size > SIZES[-1]:
+        sizes.update(range(SIZES[-1] + 64, max_size + 1, 64))
+    sizes.add(max_size)
+    return tuple(sorted(sizes))
+
+
 def _memory_snapshot() -> tuple[int | None, int | None]:
     """Return ``(current_rss, peak_rss)`` when the host exposes it."""
 
@@ -181,9 +193,7 @@ def run_benchmark(
     target.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
     memory_limit = max_memory_gb * 1024**3
-    for size in SIZES:
-        if size > max_size:
-            continue
+    for size in benchmark_sizes(max_size):
         estimated_bytes = size**3
         estimated_working_set_bytes = estimated_bytes * 30
         if estimated_working_set_bytes > memory_limit:

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any
 from uuid import uuid4
 
@@ -60,10 +61,60 @@ class SimulationSession3D:
 
 
 class SessionStore3D:
-    """A deliberately small in-memory store for one local server process."""
+    """A bounded, expiring in-memory store for one server process."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_sessions: int = 256,
+        session_ttl_seconds: float = 3600.0,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        if max_sessions < 1:
+            raise ValueError("max_sessions must be positive")
+        if session_ttl_seconds <= 0:
+            raise ValueError("session_ttl_seconds must be positive")
         self._sessions: dict[str, SimulationSession3D] = {}
+        self._last_access: dict[str, float] = {}
+        self._max_sessions = max_sessions
+        self._session_ttl_seconds = float(session_ttl_seconds)
+        self._clock = clock
+
+    @property
+    def session_count(self) -> int:
+        """Return the number of sessions currently retained by the store."""
+
+        self._prune()
+        return len(self._sessions)
+
+    def _remove(self, identifier: str) -> None:
+        self._sessions.pop(identifier, None)
+        self._last_access.pop(identifier, None)
+
+    def _prune(self, *, protected_id: str | None = None) -> None:
+        now = self._clock()
+        expired = [
+            identifier
+            for identifier, last_access in self._last_access.items()
+            if now - last_access >= self._session_ttl_seconds
+        ]
+        for identifier in expired:
+            self._remove(identifier)
+
+        overflow = len(self._sessions) - self._max_sessions
+        if overflow <= 0:
+            return
+        candidates = [
+            identifier
+            for identifier in self._sessions
+            if identifier != protected_id
+        ]
+        candidates.sort(key=lambda identifier: self._last_access.get(identifier, 0.0))
+        for identifier in candidates[:overflow]:
+            self._remove(identifier)
+
+    def _touch(self, identifier: str) -> None:
+        self._last_access[identifier] = self._clock()
 
     def create(
         self,
@@ -89,11 +140,14 @@ class SessionStore3D:
             seed=seed,
             density=float(density),
         )
+        self._touch(identifier)
+        self._prune(protected_id=identifier)
         return identifier
 
     def ensure_default(self) -> str:
         """Create the modest, paused default 3D world on first access."""
 
+        self._prune()
         if "3d-default" not in self._sessions:
             self.create(
                 depth=32,
@@ -104,15 +158,19 @@ class SessionStore3D:
                 rule="B6/S5,6,7",
                 session_id="3d-default",
             )
+        self._touch("3d-default")
         return "3d-default"
 
     def get(self, session_id: str = "3d-default") -> SimulationSession3D:
+        self._prune()
         if session_id == "3d-default" and session_id not in self._sessions:
             self.ensure_default()
         try:
-            return self._sessions[session_id]
+            session = self._sessions[session_id]
         except KeyError as exc:
             raise KeyError(f"unknown 3D session: {session_id}") from exc
+        self._touch(session_id)
+        return session
 
     @staticmethod
     def _clear_metrics(session: SimulationSession3D) -> None:

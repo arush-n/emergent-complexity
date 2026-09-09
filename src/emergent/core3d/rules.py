@@ -60,27 +60,11 @@ def _parse_counts(text: str, section: str) -> set[int]:
     if not text:
         return set()
 
-    if "," in text:
-        tokens = [token.strip() for token in text.split(",")]
-        if any(not token or not token.isdigit() for token in tokens):
-            raise ValueError(f"{section} counts must be comma-separated integers from 0 to 26")
-    else:
-        # Legacy compact notation is intentionally narrow: one digit means a
-        # single-digit count, while an entire two-digit section may represent
-        # one count from 10 through 26. Longer sections remain a sequence of
-        # single-digit counts. There is no heuristic scan of adjacent digits.
-        if not text.isdigit():
-            raise ValueError(f"{section} counts must be comma-separated integers from 0 to 26")
-        if len(text) == 2:
-            value = int(text)
-            if 10 <= value <= _MAX_COUNT:
-                tokens = [text]
-            else:
-                raise ValueError(
-                    f"{section} two-digit counts must be between 10 and 26 or comma-separated"
-                )
-        else:
-            tokens = list(text)
+    if "," not in text and len(text) > 2:
+        raise ValueError(f"{section} multiple counts must be comma-separated")
+    tokens = [token.strip() for token in text.split(",")]
+    if any(not token or not token.isdigit() for token in tokens):
+        raise ValueError(f"{section} counts must be comma-separated integers from 0 to 26")
 
     counts = [int(token) for token in tokens]
     if len(set(counts)) != len(counts):
@@ -93,9 +77,9 @@ def _parse_counts(text: str, section: str) -> set[int]:
 def parse_rule_3d(text: str) -> Rule3D:
     """Parse a 3D rule such as ``B6/S5,6,7``.
 
-    Comma-separated notation is canonical. For compatibility, compact
-    single-digit notation such as ``B6/S567`` and a two-digit section such as
-    ``B10/S10`` are also accepted.
+    A single count may be written as an integer; multiple counts must be
+    separated by commas. For example, ``B6/S5,6,7`` is valid and ``S23``
+    means survival at exactly 23 neighbors.
     """
 
     if not isinstance(text, str):

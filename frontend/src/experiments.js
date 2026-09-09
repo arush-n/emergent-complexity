@@ -1,7 +1,6 @@
 import { api } from "./api.js";
 
 const byId = (id) => document.getElementById(id);
-const BROWSER_MAX_CELL_UPDATES = 100_000_000;
 
 function numberValue(id, fallback) {
   const value = Number(byId(id).value);
@@ -37,17 +36,22 @@ export class ExperimentController {
     const seed = Math.trunc(numberValue("experiment-seed", 42));
     const work = estimateWork(dimensions, rules, initialConditions, size, steps);
     const progress = byId("experiment-progress");
-    if (work > BROWSER_MAX_CELL_UPDATES) {
-      progress.className = "status-message status-error";
-      progress.textContent = `This run is too large for the interactive server (${work.toLocaleString()} estimated cell-updates). Use the CLI experiment runner.`;
-      return;
-    }
     const runButton = byId("experiment-run");
     runButton.disabled = true;
     byId("experiment-export").disabled = true;
     progress.className = "status-message status-running";
     progress.textContent = "Running experiment...";
     try {
+      const limits = await api.experimentLimits();
+      const browserLimit = Number(limits.browser_max_cell_updates);
+      if (!Number.isSafeInteger(browserLimit) || browserLimit < 1) {
+        throw new Error("The backend returned an invalid browser workload limit.");
+      }
+      if (work > browserLimit) {
+        progress.className = "status-message status-error";
+        progress.textContent = `This run is too large for the interactive server (${work.toLocaleString()} estimated cell-updates; limit ${browserLimit.toLocaleString()}). Use the CLI experiment runner.`;
+        return;
+      }
       const result = dimensions === "3"
         ? await api.experiment3d({ rules, initial_conditions: initialConditions, size, steps, density, seed })
         : await api.experiment2d({ rules, initial_conditions: initialConditions, size, steps, density, seed });

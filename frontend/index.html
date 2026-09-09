@@ -66,8 +66,7 @@
               </div>
 
               <div class="transport" aria-label="2D simulation controls">
-                <button id="play-button" data-testid="play-button" class="button button-primary" type="button">Play</button>
-                <button id="pause-button" data-testid="pause-button" class="button button-secondary" type="button">Pause</button>
+                <button id="play-button" data-testid="play-button" class="button button-primary" type="button">▶ Play</button>
                 <button id="step-button" data-testid="step-button" class="button button-secondary" type="button">Step</button>
                 <button id="reset-button" data-testid="reset-button" class="button button-quiet" type="button">Reset</button>
                 <button id="clear-button" data-testid="clear-button" class="button button-quiet" type="button">Clear</button>
@@ -130,7 +129,7 @@
                   <label for="speed-input">Playback speed <output id="speed-value">10 gen/s</output></label>
                   <input id="speed-input" type="range" min="1" max="600" step="1" value="10" />
                 </div>
-                <label for="stability-limit">Fixed-point limit<input id="stability-limit" type="number" min="0" max="100000" step="1" value="10000" /></label>
+                <label for="stability-limit">Fixed-point limit<input id="stability-limit" type="number" min="0" max="100000" step="1" value="100" /></label>
                 <button id="stabilize-button" data-testid="stabilize-button" class="button button-secondary full-width" type="button">Run until fixed point</button>
                 <div class="file-actions">
                   <button id="save-button" class="button button-secondary" type="button">Save JSON</button>
@@ -141,7 +140,7 @@
             </aside>
           </div>
 
-          <details class="trace-drawer" open>
+          <details class="trace-drawer">
             <summary><span>EVOLUTION TRACE</span><span class="trace-summary">Population · activity · births · deaths</span><span class="trace-toggle" aria-hidden="true">+</span></summary>
             <div class="trace-content">
               <div class="chart-legend" aria-label="Chart legend">
@@ -180,18 +179,18 @@
               <div id="viewport-3d" class="viewport-frame" data-testid="viewport-3d" aria-label="Three-dimensional voxel viewport">
                 <div id="three-loading" class="viewport-message">Loading WebGL voxel renderer...</div>
                 <div class="canvas-hint">Orbit: left drag - pan: right drag - zoom: scroll</div>
-              </div>
-              <div class="viewport-toolbar">
-                <button id="3d-reset-camera" class="button button-quiet button-small" type="button">Reset camera</button>
-                <button class="chip-button" data-camera="perspective" type="button">Perspective</button>
-                <button class="chip-button" data-camera="front" type="button">Front</button>
-                <button class="chip-button" data-camera="side" type="button">Side</button>
-                <button class="chip-button" data-camera="top" type="button">Top</button>
-                <label class="check-control" for="3d-bounds-input"><input id="3d-bounds-input" type="checkbox" checked /> <span>Bounds</span></label>
-                <label class="check-control" for="3d-performance-input"><input id="3d-performance-input" type="checkbox" /> <span>Performance</span></label>
-                <button id="3d-capture-button" class="button button-quiet button-small" type="button">Capture</button>
-                <button id="3d-export-button" class="button button-quiet button-small" type="button">Export exact NPZ</button>
-                <button id="3d-share-button" class="button button-quiet button-small" type="button">Copy link</button>
+                <div class="viewport-toolbar" aria-label="3D view tools">
+                  <button id="3d-reset-camera" class="button button-quiet button-small" type="button">Reset camera</button>
+                  <button class="chip-button" data-camera="perspective" type="button">Perspective</button>
+                  <button class="chip-button" data-camera="front" type="button">Front</button>
+                  <button class="chip-button" data-camera="side" type="button">Side</button>
+                  <button class="chip-button" data-camera="top" type="button">Top</button>
+                  <label class="check-control" for="3d-bounds-input"><input id="3d-bounds-input" type="checkbox" checked /> <span>Bounds</span></label>
+                  <label class="check-control" for="3d-performance-input"><input id="3d-performance-input" type="checkbox" /> <span>Performance</span></label>
+                  <button id="3d-capture-button" class="button button-quiet button-small" type="button">Capture</button>
+                  <button id="3d-export-button" class="button button-quiet button-small" type="button">Export exact NPZ</button>
+                  <button id="3d-share-button" class="button button-quiet button-small" type="button">Copy link</button>
+                </div>
               </div>
               <div id="3d-render-warning" class="render-warning hidden">High render density - displaying a deterministic voxel sample; simulation remains exact.</div>
               <div id="3d-performance-overlay" class="performance-overlay hidden" aria-live="polite"></div>
@@ -206,8 +205,7 @@
                 <span id="3d-status-message" class="status-message" role="status" aria-live="polite">Ready</span>
               </div>
               <div class="transport" aria-label="3D simulation controls">
-                <button id="3d-play-button" class="button button-primary" type="button">Play</button>
-                <button id="3d-pause-button" class="button button-secondary" type="button">Pause</button>
+                <button id="3d-play-button" class="button button-primary" type="button">▶ Play</button>
                 <button id="3d-step-button" class="button button-secondary" type="button">Step</button>
                 <button id="3d-reset-button" class="button button-quiet" type="button">Reset</button>
                 <button id="3d-clear-button" class="button button-quiet" type="button">Clear</button>
@@ -221,7 +219,7 @@
                   <label for="3d-speed-input">Speed <output id="3d-speed-value">10 gen/s</output></label>
                   <input id="3d-speed-input" type="range" min="1" max="600" step="1" value="10" />
                 </div>
-                <label for="3d-stability-limit">Fixed-point limit<input id="3d-stability-limit" type="number" min="0" max="100000" value="1000" /></label>
+                <label for="3d-stability-limit">Fixed-point limit<input id="3d-stability-limit" type="number" min="0" max="100000" value="100" /></label>
                 <button id="3d-stabilize-button" class="button button-secondary full-width" type="button">Run until fixed point</button>
               </section>
 
@@ -246,7 +244,7 @@
                   <div><p class="section-kicker">RULE</p><h2>26-neighbor transitions</h2></div>
                   <span id="3d-rule-display" class="rule-display">B6/S5,6,7</span>
                 </div>
-                <p class="help-text" title="B counts create a new living voxel. S counts keep a living voxel alive. Each voxel has 26 neighbors.">B = birth counts, S = survival counts. Each voxel has 26 neighbors.</p>
+                <p class="help-text" title="B counts create a new living voxel. S counts keep a living voxel alive. Each voxel has 26 neighbors.">B = birth counts, S = survival counts. Use commas for multiple counts; S23 means count 23.</p>
                 <div class="rule-group">
                   <div class="rule-label"><span>Birth</span><small>0 - 26</small></div>
                   <div id="3d-birth-toggles" class="count-toggles count-toggles-3d" aria-label="3D birth neighbor counts"></div>
@@ -276,7 +274,7 @@
               </section>
             </aside>
           </div>
-          <details class="trace-drawer" open>
+          <details class="trace-drawer">
             <summary><span>EVOLUTION TRACE</span><span class="trace-summary">Population · activity · births · deaths</span><span class="trace-toggle" aria-hidden="true">+</span></summary>
             <div class="trace-content">
               <svg id="metrics-chart-3d" viewBox="0 0 640 310" role="img" aria-label="3D population, activity, births, and deaths over generations"></svg>
@@ -298,7 +296,7 @@
         <section id="mode-compare" class="mode-panel hidden" aria-labelledby="compare-heading">
           <section class="panel page-heading">
             <div><p class="section-kicker">SIDE-BY-SIDE</p><h2 id="compare-heading">Compare 2D and 3D states</h2><p class="chart-note">The two systems share seed and density, but use explicitly selected rules and grid sizes.</p></div>
-            <div class="compare-actions"><button id="compare-play" class="button button-primary" type="button">Play both</button><button id="compare-pause" class="button button-secondary" type="button">Pause</button><button id="compare-step" class="button button-secondary" type="button">Step both</button><button id="compare-randomize" class="button button-primary" type="button">Randomize both</button><button id="compare-reset" class="button button-quiet" type="button">Reset both</button></div>
+            <div class="compare-actions"><button id="compare-play" class="button button-primary" type="button">▶ Play both</button><button id="compare-step" class="button button-secondary" type="button">Step both</button><button id="compare-randomize" class="button button-primary" type="button">Randomize both</button><button id="compare-reset" class="button button-quiet" type="button">Reset both</button></div>
           </section>
           <section class="panel compare-controls">
             <div class="field-grid four-up">
