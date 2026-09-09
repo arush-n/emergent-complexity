@@ -39,6 +39,8 @@ class SimulationSession3D:
     births: int = 0
     deaths: int = 0
     last_step_ms: float = 0.0
+    last_render_extract_ms: float = 0.0
+    last_serialization_ms: float = 0.0
 
     @property
     def depth(self) -> int:
@@ -283,6 +285,7 @@ class SessionStore3D:
         if max_voxels < 1:
             raise ValueError("max_voxels must be positive")
         session = self.get(session_id)
+        extract_start = perf_counter()
         values = np.asarray(jax.device_get(session.grid), dtype=np.uint8)
         flat_indices = np.flatnonzero(values)
         render_indices = flat_indices
@@ -291,8 +294,10 @@ class SessionStore3D:
             render_indices = np.linspace(0, len(flat_indices) - 1, max_voxels, dtype=np.int64)
             render_indices = flat_indices[render_indices]
         coordinates = np.column_stack(np.unravel_index(render_indices, values.shape)).tolist()
+        render_extract_ms = (perf_counter() - extract_start) * 1000
         alive = int(values.sum())
-        return {
+        serialization_start = perf_counter()
+        response = {
             "session_id": session_id,
             "dimensions": 3,
             "rule": format_rule_3d(session.rule),
@@ -304,6 +309,7 @@ class SessionStore3D:
             "density": session.density,
             "generation": session.generation,
             "alive": alive,
+            "total_cells": session.total_cells,
             "alive_fraction": alive / session.total_cells,
             "changed_cells": session.changed_cells,
             "changed_fraction": session.changed_cells / session.total_cells,
@@ -315,11 +321,34 @@ class SessionStore3D:
             "running": session.running,
             "jax_device": str(jax.devices()[0]),
             "last_step_ms": session.last_step_ms,
+            "simulation_ms": session.last_step_ms,
+            "render_extract_ms": render_extract_ms,
+            "serialization_ms": 0.0,
             "voxels": coordinates,
             "rendered_voxels": len(coordinates),
             "render_sampled": sampled,
             "render_limit": max_voxels,
         }
+        serialization_ms = (perf_counter() - serialization_start) * 1000
+        session.last_render_extract_ms = render_extract_ms
+        session.last_serialization_ms = serialization_ms
+        response["serialization_ms"] = serialization_ms
+        return response
+
+    def export_npz(self, session_id: str = "3d-default") -> tuple[bytes, int]:
+        """Return an exact NPZ state and its generation for a browser download."""
+
+        from ..io.serialization_3d import state_to_npz_bytes_3d
+
+        session = self.get(session_id)
+        content = state_to_npz_bytes_3d(
+            session.grid,
+            session.rule,
+            seed=session.seed,
+            density=session.density,
+            generation=session.generation,
+        )
+        return content, session.generation
 
     def slice_payload(
         self,
@@ -330,22 +359,32 @@ class SessionStore3D:
     ) -> dict[str, Any]:
         """Return one exact 2D cross-section for an adjacent canvas."""
 
-        session = self.get(session_id)
-        values = np.asarray(jax.device_get(session.grid), dtype=np.uint8)
         if axis not in {"x", "y", "z"}:
             raise ValueError("axis must be x, y, or z")
+        session = self.get(session_id)
         limits = {"z": session.depth, "y": session.height, "x": session.width}
         if index < 0 or index >= limits[axis]:
             raise ValueError(f"slice index must be between 0 and {limits[axis] - 1}")
-        selected = {"z": values[index, :, :], "y": values[:, index, :], "x": values[:, :, index]}[
-            axis
-        ]
-        return {
+        if axis == "z":
+            selected = session.grid[index, :, :]
+        elif axis == "y":
+            selected = session.grid[:, index, :]
+        else:
+            selected = session.grid[:, :, index]
+        extract_start = perf_counter()
+        selected_host = np.asarray(jax.device_get(selected), dtype=np.uint8)
+        render_extract_ms = (perf_counter() - extract_start) * 1000
+        serialization_start = perf_counter()
+        response = {
             "session_id": session_id,
             "axis": axis,
             "index": index,
-            "height": int(selected.shape[0]),
-            "width": int(selected.shape[1]),
-            "alive": int(selected.sum()),
-            "grid": selected.tolist(),
+            "height": int(selected_host.shape[0]),
+            "width": int(selected_host.shape[1]),
+            "alive": int(selected_host.sum()),
+            "grid": selected_host.tolist(),
+            "render_extract_ms": render_extract_ms,
+            "serialization_ms": 0.0,
         }
+        response["serialization_ms"] = (perf_counter() - serialization_start) * 1000
+        return response

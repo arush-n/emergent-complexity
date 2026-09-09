@@ -62,11 +62,13 @@ export function createRuleEditor(
       }
       const parseCounts = (text) => {
         if (!text) return [];
-        const counts = separator
-          ? (text.includes(",") ? text.split(",").map(Number) : [...text].map(Number))
-          : [...text].map(Number);
+        let counts;
+        if (!separator) counts = [...text].map(Number);
+        else if (text.includes(",")) counts = text.split(",").map(Number);
+        else if (text.length === 2 && Number(text) >= 10 && Number(text) <= maxCount) counts = [Number(text)];
+        else if (text.length === 2) throw new Error(`Two-digit counts must be between 10 and ${maxCount} or comma-separated.`);
+        else counts = [...text].map(Number);
         if (
-          (separator && !text.includes(",") && [...text].some((_, index) => index < text.length - 1 && Number(text.slice(index, index + 2)) >= 10 && Number(text.slice(index, index + 2)) <= 26)) ||
           counts.some((count) => !Number.isInteger(count) || count < 0 || count > maxCount) ||
           new Set(counts).size !== counts.length
         ) {

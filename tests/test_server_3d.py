@@ -1,5 +1,11 @@
+import io
+import json
+
+import jax.numpy as jnp
+import numpy as np
 from fastapi.testclient import TestClient
 
+import emergent.server.sessions_3d as sessions_3d_module
 from emergent.server.app import create_app
 from emergent.server.sessions import SessionStore
 from emergent.server.sessions_3d import SessionStore3D
@@ -89,3 +95,125 @@ def test_api_3d_experiment_endpoint_returns_raw_rows(tmp_path) -> None:
     body = response.json()
     assert len(body["rows"]) == 1
     assert body["manifest"]["dimensions"] == 3
+
+
+def test_api_experiment_endpoint_rejects_browser_workloads_that_are_too_large() -> None:
+    client = TestClient(create_app(SessionStore(), SessionStore3D()))
+    response = client.post(
+        "/api/experiments/3d",
+        json={
+            "rules": 100,
+            "initial_conditions": 100,
+            "size": 96,
+            "steps": 2_000,
+            "density": 0.1,
+            "seed": 42,
+        },
+    )
+    assert response.status_code == 400
+    assert "Use the CLI experiment runner" in response.json()["detail"]
+
+
+def test_api_3d_slices_are_exact_for_all_axes_and_transfer_only_a_plane(monkeypatch) -> None:
+    store = SessionStore3D()
+    store.create(
+        depth=3,
+        height=4,
+        width=5,
+        density=0,
+        seed=1,
+        rule="B/S",
+        session_id="slice-3d",
+    )
+    grid = jnp.zeros((3, 4, 5), dtype=jnp.uint8)
+    grid = grid.at[1, 2, 3].set(1).at[2, 0, 4].set(1)
+    session = store.get("slice-3d")
+    session.grid = grid
+
+    original_device_get = sessions_3d_module.jax.device_get
+    transferred_shapes = []
+
+    def record_shape(value):
+        transferred_shapes.append(tuple(value.shape))
+        return original_device_get(value)
+
+    monkeypatch.setattr(sessions_3d_module.jax, "device_get", record_shape)
+    client = TestClient(create_app(SessionStore(), store))
+    indices = {"z": 1, "y": 2, "x": 4}
+    slices = {
+        axis: client.get(
+            "/api/3d/slice",
+            params={"session_id": "slice-3d", "axis": axis, "index": indices[axis]},
+        ).json()
+        for axis in ("z", "y", "x")
+    }
+
+    assert slices["z"]["height"] == 4
+    assert slices["z"]["width"] == 5
+    assert slices["z"]["alive"] == 1
+    assert slices["y"]["height"] == 3
+    assert slices["y"]["width"] == 5
+    assert slices["y"]["alive"] == 1
+    assert slices["x"]["height"] == 3
+    assert slices["x"]["width"] == 4
+    assert slices["x"]["alive"] == 1
+    assert transferred_shapes == [(4, 5), (3, 5), (3, 4)]
+
+
+def test_api_3d_render_payload_transfers_the_volume_once(monkeypatch) -> None:
+    store = SessionStore3D()
+    store.create(
+        depth=3,
+        height=4,
+        width=5,
+        density=0,
+        seed=1,
+        rule="B/S",
+        session_id="payload-3d",
+    )
+    session = store.get("payload-3d")
+    session.grid = session.grid.at[1, 2, 3].set(1)
+    original_device_get = sessions_3d_module.jax.device_get
+    transferred_shapes = []
+
+    def record_shape(value):
+        transferred_shapes.append(tuple(value.shape))
+        return original_device_get(value)
+
+    monkeypatch.setattr(sessions_3d_module.jax, "device_get", record_shape)
+    payload = store.payload("payload-3d")
+
+    assert payload["alive"] == 1
+    assert payload["rendered_voxels"] == 1
+    assert transferred_shapes == [(3, 4, 5)]
+
+
+def test_api_3d_export_is_an_exact_npz_and_view_export_is_explicit() -> None:
+    store = SessionStore3D()
+    store.create(
+        depth=8,
+        height=8,
+        width=8,
+        density=0,
+        seed=2,
+        rule="B1/S",
+        session_id="export-3d",
+    )
+    session = store.get("export-3d")
+    session.grid = session.grid.at[2, 3, 4].set(1)
+    session.generation = 7
+    client = TestClient(create_app(SessionStore(), store))
+
+    response = client.get("/api/3d/export", params={"session_id": "export-3d"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    assert response.headers["content-disposition"].endswith('life-lab-3d-gen-7.npz"')
+    with np.load(io.BytesIO(response.content), allow_pickle=False) as archive:
+        assert archive["grid"].shape == (8, 8, 8)
+        assert int(archive["grid"].sum()) == 1
+        assert json.loads(str(archive["metadata"].item()))["generation"] == 7
+
+    view = client.get("/api/3d/export-view", params={"session_id": "export-3d", "max_voxels": 1})
+    assert view.status_code == 200
+    assert view.json()["export_kind"] == "render_view"
+    assert view.json()["exact"] is False

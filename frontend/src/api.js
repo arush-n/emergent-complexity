@@ -14,6 +14,22 @@ async function request(path, options = {}) {
   return body;
 }
 
+async function download(path, fallbackFilename) {
+  const response = await fetch(`${API_ROOT}${path}`);
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const body = contentType.includes("application/json") ? await response.json() : await response.text();
+    const detail = typeof body === "object" && body !== null ? body.detail : body;
+    throw new Error(detail || `Download failed with status ${response.status}`);
+  }
+  const disposition = response.headers.get("content-disposition") || "";
+  const filenameMatch = disposition.match(/filename="([^"]+)"/i);
+  return {
+    blob: await response.blob(),
+    filename: filenameMatch?.[1] || fallbackFilename,
+  };
+}
+
 function sessionQuery(sessionId) {
   return `?session_id=${encodeURIComponent(sessionId)}`;
 }
@@ -112,8 +128,11 @@ export const api = {
   slice3d(sessionId, axis, index) {
     return request(`/3d/slice?session_id=${encodeURIComponent(sessionId)}&axis=${axis}&index=${index}`);
   },
-  exportState3d(sessionId, maxVoxels = 75000) {
-    return request(`/3d/export${sessionQuery(sessionId)}&max_voxels=${maxVoxels}`);
+  exportState3d(sessionId) {
+    return download(`/3d/export${sessionQuery(sessionId)}`, `life-lab-3d-state.npz`);
+  },
+  exportView3d(sessionId, maxVoxels = 75000) {
+    return request(`/3d/export-view${sessionQuery(sessionId)}&max_voxels=${maxVoxels}`);
   },
   experiment3d(config) {
     return request("/experiments/3d", { method: "POST", body: JSON.stringify(config) });

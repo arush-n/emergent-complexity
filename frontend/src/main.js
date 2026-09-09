@@ -48,11 +48,18 @@ let activeMode = "2d";
 const threeLab = new ThreeLabController();
 const compareLab = new CompareController();
 const experimentLab = new ExperimentController();
+const controlsToggle = byId("controls-toggle");
 
 function setStatus(message, isError = false) {
   statusMessage.textContent = message;
-  statusMessage.style.color = isError ? "#f39c92" : "";
+  statusMessage.classList.toggle("status-error", isError);
+  statusMessage.classList.toggle("status-success", !isError);
 }
+
+controlsToggle?.addEventListener("click", () => {
+  const collapsed = document.body.classList.toggle("controls-collapsed");
+  controlsToggle.setAttribute("aria-expanded", String(!collapsed));
+});
 
 function numberValue(input, fallback) {
   const value = Number(input.value);
@@ -234,12 +241,12 @@ function capture2D() {
   output.width = source.width;
   output.height = source.height + 42;
   const context = output.getContext("2d");
-  context.fillStyle = "#050910";
+  context.fillStyle = "#050505";
   context.fillRect(0, 0, output.width, output.height);
   context.drawImage(source, 0, 0);
-  context.fillStyle = "#0b1321";
+  context.fillStyle = "#111110";
   context.fillRect(0, source.height, output.width, 42);
-  context.fillStyle = "#d8fff0";
+  context.fillStyle = "#eeede5";
   context.font = "14px monospace";
   context.fillText(`2D | ${currentState.rule} | Generation ${currentState.generation} | ${currentState.width} x ${currentState.height} | Seed ${currentState.seed}`, 14, source.height + 26);
   const link = document.createElement("a");

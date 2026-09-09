@@ -15,7 +15,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,9 +25,8 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-from emergent.core3d.rules import parse_rule_3d
-from emergent.core3d.simulate import run_steps_3d
-from emergent.core3d.step import count_neighbors_3d
+from emergent.core3d.rules import parse_rule_3d, rule_to_masks_3d
+from emergent.core3d.simulate import run_steps_3d_jit
 
 SIZES = (16, 32, 48, 64, 96, 128, 160, 192, 256)
 RESULT_FIELDS = (
@@ -39,29 +40,109 @@ RESULT_FIELDS = (
     "compile_ms",
     "warm_ms_per_generation",
     "warm_generations_per_second",
+    "process_rss_before_bytes",
+    "process_rss_after_bytes",
+    "process_rss_delta_bytes",
     "peak_memory_bytes",
     "status",
     "error",
 )
 
 
+def _memory_snapshot() -> tuple[int | None, int | None]:
+    """Return ``(current_rss, peak_rss)`` when the host exposes it."""
+
+    current: int | None = None
+    try:
+        import psutil
+
+        current = int(psutil.Process().memory_info().rss)
+    except (ImportError, OSError, AttributeError):
+        pass
+
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class ProcessMemoryCounters(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            counters = ProcessMemoryCounters()
+            counters.cb = ctypes.sizeof(ProcessMemoryCounters)
+            process = ctypes.windll.kernel32.GetCurrentProcess()
+            ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+                process,
+                ctypes.byref(counters),
+                counters.cb,
+            )
+            if ok:
+                return current or int(counters.WorkingSetSize), int(counters.PeakWorkingSetSize)
+        except (AttributeError, OSError, TypeError):
+            return current, None
+    else:
+        try:
+            import resource
+
+            peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            # Linux reports KiB; macOS reports bytes.
+            if os.uname().sysname == "Darwin":
+                peak_bytes = peak
+            else:
+                peak_bytes = peak * 1024
+            return current, peak_bytes
+        except (ImportError, OSError, AttributeError):
+            pass
+    return current, None
+
+
+def _empty_memory_fields() -> dict[str, int | str]:
+    return {
+        "process_rss_before_bytes": "",
+        "process_rss_after_bytes": "",
+        "process_rss_delta_bytes": "",
+        "peak_memory_bytes": "",
+    }
+
+
 def _benchmark_size(size: int, steps: int, repeats: int) -> dict[str, Any]:
+    memory_before, peak_before = _memory_snapshot()
     grid = jnp.zeros((size, size, size), dtype=jnp.uint8)
     grid = grid.at[size // 2, size // 2, size // 2].set(1)
     rule = parse_rule_3d("B6/S5,6,7")
-    # Establish the neighbor implementation in the same process and device.
-    count_neighbors_3d(grid).block_until_ready()
+    birth, survival = rule_to_masks_3d(rule)
 
+    # Lowering/compilation is measured separately from the first execution.
     compile_start = time.perf_counter()
-    run_steps_3d(grid, rule, steps).block_until_ready()
+    lowered = run_steps_3d_jit.lower(grid, birth, survival, steps)
+    compiled: Callable[..., Any] = lowered.compile()
     compile_ms = (time.perf_counter() - compile_start) * 1000
+    compiled(grid, birth, survival).block_until_ready()
 
     warm_start = time.perf_counter()
     for _ in range(repeats):
-        run_steps_3d(grid, rule, steps).block_until_ready()
+        compiled(grid, birth, survival).block_until_ready()
     warm_elapsed = time.perf_counter() - warm_start
+    memory_after, peak_after = _memory_snapshot()
     generations = steps * repeats
     warm_ms_per_generation = warm_elapsed * 1000 / generations if generations else 0.0
+    peak_memory = peak_after or peak_before
+    rss_delta = (
+        memory_after - memory_before
+        if memory_after is not None and memory_before is not None
+        else None
+    )
     return {
         "size": size,
         "shape": f"{size}x{size}x{size}",
@@ -75,7 +156,10 @@ def _benchmark_size(size: int, steps: int, repeats: int) -> dict[str, Any]:
         "warm_generations_per_second": 1000 / warm_ms_per_generation
         if warm_ms_per_generation
         else 0.0,
-        "peak_memory_bytes": "",
+        "process_rss_before_bytes": memory_before or "",
+        "process_rss_after_bytes": memory_after or "",
+        "process_rss_delta_bytes": rss_delta if rss_delta is not None else "",
+        "peak_memory_bytes": peak_memory or "",
         "status": "ok",
         "error": "",
     }
@@ -115,7 +199,7 @@ def run_benchmark(
                     "compile_ms": "",
                     "warm_ms_per_generation": "",
                     "warm_generations_per_second": "",
-                    "peak_memory_bytes": "",
+                    **_empty_memory_fields(),
                     "status": "skipped-memory-limit",
                     "error": f"estimated working set exceeds {max_memory_gb:g} GiB limit",
                 }
@@ -136,7 +220,7 @@ def run_benchmark(
                 "compile_ms": "",
                 "warm_ms_per_generation": "",
                 "warm_generations_per_second": "",
-                "peak_memory_bytes": "",
+                **_empty_memory_fields(),
                 "status": "failed",
                 "error": f"{type(exc).__name__}: {exc}",
             }

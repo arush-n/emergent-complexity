@@ -19,6 +19,10 @@ export class CompareController {
     this.active = false;
     this.playing = false;
     this.timer = null;
+    this.playbackToken = 0;
+    this.playbackLastTime = 0;
+    this.playbackBudget = 0;
+    this.inFlight = false;
     this.view = new ThreeVoxelView(byId("compare-3d-viewport"), { maxVoxels: 50000 });
     this.grid = new GridCanvas(byId("compare-2d-canvas"), {
       onCommit: (grid) => {
@@ -32,17 +36,21 @@ export class CompareController {
   setStatus(message, isError = false) {
     const element = byId("compare-status");
     element.textContent = message;
-    element.style.color = isError ? "#f39c92" : "";
+    element.classList.toggle("status-error", isError);
+    element.classList.toggle("status-success", !isError);
   }
 
   async activate() {
     this.active = true;
     if (this.initialized) {
+      this.view.start();
       this.view.resize();
       return;
     }
+    this.setStatus("Preparing comparison...");
     try {
       await this.view.init();
+      this.view.start();
       await this.createBoth();
       this.initialized = true;
       this.setStatus("Ready - shared seed and density");
@@ -54,6 +62,7 @@ export class CompareController {
   deactivate() {
     this.active = false;
     this.stop();
+    this.view.stop();
   }
 
   async createBoth() {
@@ -85,35 +94,64 @@ export class CompareController {
     byId("compare-3d-stats").textContent = `Generation ${state.generation} | Alive ${Number(state.alive).toLocaleString()} (${(state.alive_fraction * 100).toFixed(2)}%) | Changed ${(state.changed_fraction * 100).toFixed(2)}%`;
   }
 
-  async stepBoth() {
+  async stepBoth(steps = 1, announce = true) {
+    if (this.inFlight) return false;
+    this.inFlight = true;
     try {
       const [state2d, state3d] = await Promise.all([
-        api.step(this.session2d, 1, true),
-        api.step3d(this.session3d, 1, true),
+        api.step(this.session2d, steps, steps === 1),
+        api.step3d(this.session3d, steps, steps === 1),
       ]);
       this.render2d(state2d);
       this.render3d(state3d);
-      this.setStatus("Advanced both systems one generation");
+      if (announce) this.setStatus(steps === 1 ? "Advanced both systems one generation" : `Advanced both systems ${steps} generations`);
+      return true;
     } catch (error) {
       this.setStatus(error.message, true);
+      return false;
+    } finally {
+      this.inFlight = false;
     }
   }
 
   start() {
     if (this.playing) return;
     this.playing = true;
+    this.playbackToken += 1;
+    this.playbackLastTime = performance.now();
+    this.playbackBudget = 0;
+    const token = this.playbackToken;
     byId("compare-play").disabled = true;
     byId("compare-pause").disabled = false;
-    const tick = async () => {
-      if (!this.playing) return;
-      await this.stepBoth();
-      if (this.playing) this.timer = window.setTimeout(tick, 1000 / Math.max(numberValue("compare-speed", 10), 1));
-    };
-    tick();
+    this.setStatus("Playing both systems");
+    this.playbackTick(token);
+  }
+
+  async playbackTick(token) {
+    if (!this.playing || !this.active || token !== this.playbackToken) return;
+    const now = performance.now();
+    const elapsed = this.playbackLastTime ? Math.min(now - this.playbackLastTime, 250) : 0;
+    this.playbackLastTime = now;
+    this.playbackBudget += (elapsed / 1000) * Math.max(numberValue("compare-speed", 10), 1);
+    const steps = Math.min(Math.floor(this.playbackBudget), 800);
+    if (steps > 0) {
+      this.playbackBudget -= steps;
+      const completed = await this.stepBoth(steps, false);
+      if (!completed) {
+        this.stop();
+        return;
+      }
+    }
+    if (this.playing && this.active && token === this.playbackToken) {
+      this.timer = window.setTimeout(() => this.playbackTick(token), 33);
+    }
   }
 
   stop() {
     this.playing = false;
+    this.playbackToken += 1;
+    this.playbackLastTime = 0;
+    this.playbackBudget = 0;
     if (this.timer) window.clearTimeout(this.timer);
     this.timer = null;
     byId("compare-play").disabled = false;

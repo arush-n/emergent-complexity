@@ -10,9 +10,10 @@ from typing import Any
 import jax
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from ..experiments.workload import BROWSER_MAX_CELL_UPDATES, validate_browser_workload
 from .models import (
     ActionRequest,
     Experiment2DRequest,
@@ -361,13 +362,35 @@ def create_app(
     @application.get("/api/3d/export")
     def export_state_3d(
         session_id: str = Query(default="3d-default"),
+    ) -> Response:
+        try:
+            content, generation = session_store_3d.export_npz(session_id)
+            return Response(
+                content=content,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": (
+                        f'attachment; filename="life-lab-3d-gen-{generation}.npz"'
+                    )
+                },
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/3d/export-view")
+    def export_view_3d(
+        session_id: str = Query(default="3d-default"),
         max_voxels: int = Query(default=75_000, ge=1, le=200_000),
     ) -> JSONResponse:
+        """Export the capped render view, explicitly distinct from exact state."""
+
         try:
             payload = session_store_3d.payload(session_id, max_voxels=max_voxels)
+            payload["export_kind"] = "render_view"
+            payload["exact"] = False
             payload["export_note"] = (
-                "Export contains rendered living voxel coordinates; the Python API supports "
-                "full NPZ/JSON state persistence."
+                "This JSON contains displayed living voxel coordinates only. "
+                "Use the exact NPZ export for the complete grid."
             )
             return JSONResponse(payload)
         except KeyError as exc:
@@ -378,6 +401,13 @@ def create_app(
         from ..experiments.random_3d import run_random_3d_experiment
 
         try:
+            validate_browser_workload(
+                dimensions=3,
+                rules=payload.rules,
+                initial_conditions=payload.initial_conditions,
+                size=payload.size,
+                steps=payload.steps,
+            )
             return run_random_3d_experiment(
                 rules=payload.rules,
                 initial_conditions=payload.initial_conditions,
@@ -395,6 +425,13 @@ def create_app(
         from ..experiments.random_2d import run_random_2d_experiment
 
         try:
+            validate_browser_workload(
+                dimensions=2,
+                rules=payload.rules,
+                initial_conditions=payload.initial_conditions,
+                size=payload.size,
+                steps=payload.steps,
+            )
             return run_random_2d_experiment(
                 rules=payload.rules,
                 initial_conditions=payload.initial_conditions,
@@ -406,6 +443,10 @@ def create_app(
             )
         except (TypeError, ValueError, OSError) as exc:
             raise _bad_request(exc) from exc
+
+    @application.get("/api/experiments/limits")
+    def experiment_limits() -> dict[str, int]:
+        return {"browser_max_cell_updates": BROWSER_MAX_CELL_UPDATES}
 
     if FRONTEND_DIR.exists():
         application.mount(

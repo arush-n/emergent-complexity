@@ -57,7 +57,7 @@ function pathFor(points, key, totalCells, plot) {
 function drawPlotFrame(svg, plot, label) {
   const plotWidth = WIDTH - PADDING.left - PADDING.right;
   addText(svg, label, PADDING.left, plot.top - 10, {
-    fill: "#b7c9df",
+    fill: "#aaa99f",
     "font-size": 11,
     "font-weight": 700,
     "letter-spacing": "0.08em",
@@ -69,11 +69,11 @@ function drawPlotFrame(svg, plot, label) {
       y1: y,
       x2: PADDING.left + plotWidth,
       y2: y,
-      stroke: "#25364f",
+      stroke: "#292926",
       "stroke-width": 1,
     }));
     addText(svg, `${Math.round(fraction * 100)}%`, PADDING.left - 10, y + 4, {
-      fill: "#8492a9",
+      fill: "#75756d",
       "font-size": 11,
       "text-anchor": "end",
     });
@@ -110,8 +110,8 @@ export function renderMetricsChart(svg, points, totalCells) {
     y: 0,
     width: WIDTH,
     height: HEIGHT,
-    rx: 12,
-    fill: "#0a1220",
+    rx: 2,
+    fill: "#111110",
   }));
 
   const plotWidth = WIDTH - PADDING.left - PADDING.right;
@@ -120,32 +120,32 @@ export function renderMetricsChart(svg, points, totalCells) {
 
   if (!points.length) {
     addText(svg, "Start the simulation to build a history", WIDTH / 2, 150, {
-      fill: "#8492a9",
+      fill: "#75756d",
       "font-size": 13,
       "text-anchor": "middle",
     });
     return;
   }
 
-  drawSeries(svg, points, "alive", "#70e2bd", totalCells, POPULATION_PLOT, { width: 3 });
-  drawSeries(svg, points, "activity", "#f0bd76", totalCells, POPULATION_PLOT, { dash: "5 5" });
-  drawSeries(svg, points, "births", "#6fb3ff", totalCells, EVENTS_PLOT, { width: 2 });
-  drawSeries(svg, points, "deaths", "#f39c92", totalCells, EVENTS_PLOT, { width: 2 });
+  drawSeries(svg, points, "alive", "#e7e6de", totalCells, POPULATION_PLOT, { width: 3 });
+  drawSeries(svg, points, "activity", "#b8cd78", totalCells, POPULATION_PLOT, { dash: "5 5" });
+  drawSeries(svg, points, "births", "#83a981", totalCells, EVENTS_PLOT, { width: 2 });
+  drawSeries(svg, points, "deaths", "#b97a73", totalCells, EVENTS_PLOT, { width: 2 });
 
   const lastIndex = points.length - 1;
   const lastX = PADDING.left + (lastIndex / Math.max(points.length - 1, 1)) * plotWidth;
   for (const [key, color, plot] of [
-    ["alive", "#70e2bd", POPULATION_PLOT],
-    ["activity", "#f0bd76", POPULATION_PLOT],
-    ["births", "#6fb3ff", EVENTS_PLOT],
-    ["deaths", "#f39c92", EVENTS_PLOT],
+    ["alive", "#e7e6de", POPULATION_PLOT],
+    ["activity", "#b8cd78", POPULATION_PLOT],
+    ["births", "#83a981", EVENTS_PLOT],
+    ["deaths", "#b97a73", EVENTS_PLOT],
   ]) {
     const lastY = plot.top + (1 - pointValue(points[lastIndex], key, totalCells)) * plot.height;
     svg.appendChild(svgElement("circle", {
       cx: lastX,
       cy: lastY,
       r: 3.5,
-      fill: "#0a1220",
+      fill: "#111110",
       stroke: color,
       "stroke-width": 2,
     }));
@@ -154,11 +154,11 @@ export function renderMetricsChart(svg, points, totalCells) {
   const firstGeneration = points[0].generation;
   const lastGeneration = points[lastIndex].generation;
   addText(svg, `gen ${firstGeneration}`, PADDING.left, HEIGHT - 14, {
-    fill: "#8492a9",
+    fill: "#75756d",
     "font-size": 11,
   });
   addText(svg, `gen ${lastGeneration}`, PADDING.left + plotWidth, HEIGHT - 14, {
-    fill: "#8492a9",
+    fill: "#75756d",
     "font-size": 11,
     "text-anchor": "end",
   });

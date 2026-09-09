@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +114,40 @@ def export_state_json_3d(
     )
 
 
+def state_to_npz_bytes_3d(
+    grid: Grid3D,
+    rule: Rule3D,
+    *,
+    seed: int | None = None,
+    density: float | None = None,
+    generation: int = 0,
+) -> bytes:
+    """Serialize a complete 3D state to an in-memory NPZ download."""
+
+    values = np.asarray(jax.device_get(grid), dtype=np.uint8)
+    if values.ndim != 3:
+        raise ValueError("only single three-dimensional grids can be serialized")
+    if generation < 0:
+        raise ValueError("generation must be non-negative")
+    metadata = {
+        "dimensions": 3,
+        "rule": format_rule_3d(rule),
+        "depth": int(values.shape[0]),
+        "height": int(values.shape[1]),
+        "width": int(values.shape[2]),
+        "seed": seed,
+        "density": density,
+        "generation": int(generation),
+    }
+    buffer = io.BytesIO()
+    np.savez_compressed(
+        buffer,
+        grid=(values != 0).astype(np.uint8),
+        metadata=json.dumps(metadata),
+    )
+    return buffer.getvalue()
+
+
 def import_state_json_3d(text: str) -> SavedState3D:
     """Load a 3D state from JSON text."""
 
@@ -171,19 +206,25 @@ def save_state_3d(
     """Save a complete 3D state as ``.json`` or metadata-bearing ``.npz``."""
 
     target = Path(path)
-    payload = state_to_dict_3d(
-        grid,
-        rule,
-        seed=seed,
-        density=density,
-        generation=generation,
-    )
     if target.suffix.lower() == ".json":
+        payload = state_to_dict_3d(
+            grid,
+            rule,
+            seed=seed,
+            density=density,
+            generation=generation,
+        )
         target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     elif target.suffix.lower() == ".npz":
-        metadata = {key: value for key, value in payload.items() if key != "grid"}
-        values = np.asarray(payload["grid"], dtype=np.uint8)
-        np.savez_compressed(target, grid=values, metadata=json.dumps(metadata))
+        target.write_bytes(
+            state_to_npz_bytes_3d(
+                grid,
+                rule,
+                seed=seed,
+                density=density,
+                generation=generation,
+            )
+        )
     else:
         raise ValueError("complete 3D states must end in .json or .npz")
 

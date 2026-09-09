@@ -28,6 +28,7 @@ from .serialization_3d import (
     save_grid_3d,
     save_state_3d,
     state_to_dict_3d,
+    state_to_npz_bytes_3d,
 )
 
 __all__ = [
@@ -52,6 +53,7 @@ __all__ = [
     "save_grid_3d",
     "save_state",
     "save_state_3d",
+    "state_to_npz_bytes_3d",
     "state_to_dict",
     "state_to_dict_3d",
 ]

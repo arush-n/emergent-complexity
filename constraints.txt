@@ -1,0 +1,12 @@
+# Known-good CPU development environment tested on 2026-09-08.
+# The declared ranges remain in pyproject.toml; this file pins the environment
+# used by local verification and CI.
+jax==0.10.2
+jaxlib==0.10.2
+numpy==2.4.6
+fastapi==0.141.1
+uvicorn==0.52.4
+httpx==0.28.1
+psutil==7.2.2
+pytest==9.1.1
+ruff==0.16.6

@@ -65,13 +65,22 @@ def _parse_counts(text: str, section: str) -> set[int]:
         if any(not token or not token.isdigit() for token in tokens):
             raise ValueError(f"{section} counts must be comma-separated integers from 0 to 26")
     else:
-        # Compact notation remains convenient for single-digit counts, but
-        # multi-digit values must use commas so B10 cannot be ambiguous.
+        # Legacy compact notation is intentionally narrow: one digit means a
+        # single-digit count, while an entire two-digit section may represent
+        # one count from 10 through 26. Longer sections remain a sequence of
+        # single-digit counts. There is no heuristic scan of adjacent digits.
         if not text.isdigit():
             raise ValueError(f"{section} counts must be comma-separated integers from 0 to 26")
-        if any(10 <= int(text[index : index + 2]) <= 26 for index in range(len(text) - 1)):
-            raise ValueError(f"{section} counts 10 through 26 must be written with commas")
-        tokens = list(text)
+        if len(text) == 2:
+            value = int(text)
+            if 10 <= value <= _MAX_COUNT:
+                tokens = [text]
+            else:
+                raise ValueError(
+                    f"{section} two-digit counts must be between 10 and 26 or comma-separated"
+                )
+        else:
+            tokens = list(text)
 
     counts = [int(token) for token in tokens]
     if len(set(counts)) != len(counts):
@@ -84,9 +93,9 @@ def _parse_counts(text: str, section: str) -> set[int]:
 def parse_rule_3d(text: str) -> Rule3D:
     """Parse a 3D rule such as ``B6/S5,6,7``.
 
-    Comma-separated notation is required for counts of ten or greater. For
-    convenience, compact single-digit notation such as ``B6/S567`` is also
-    accepted.
+    Comma-separated notation is canonical. For compatibility, compact
+    single-digit notation such as ``B6/S567`` and a two-digit section such as
+    ``B10/S10`` are also accepted.
     """
 
     if not isinstance(text, str):

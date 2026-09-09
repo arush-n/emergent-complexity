@@ -1,6 +1,9 @@
+import io
+import json
 from pathlib import Path
 
 import jax.numpy as jnp
+import numpy as np
 
 from emergent.core3d.rules import parse_rule_3d
 from emergent.io.serialization_3d import (
@@ -11,6 +14,7 @@ from emergent.io.serialization_3d import (
     save_grid_3d,
     save_state_3d,
     state_to_dict_3d,
+    state_to_npz_bytes_3d,
 )
 
 
@@ -40,3 +44,8 @@ def test_3d_json_and_numpy_persistence(tmp_path: Path) -> None:
     assert jnp.array_equal(restored.grid, grid)
     assert restored.rule == rule
     assert restored.generation == 4
+
+    content = state_to_npz_bytes_3d(grid, rule, generation=9)
+    with np.load(io.BytesIO(content), allow_pickle=False) as archive:
+        assert jnp.array_equal(jnp.asarray(archive["grid"]), grid)
+        assert json.loads(str(archive["metadata"].item()))["generation"] == 9

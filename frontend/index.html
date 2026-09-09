@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#080a0b" />
+    <meta name="theme-color" content="#0b0b0a" />
     <title>Emergent Complexity - Life Lab</title>
     <link rel="stylesheet" href="./styles.css" />
     <script type="importmap">
       {
         "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+          "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
         }
       }
     </script>
@@ -18,19 +18,18 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">JAX RESEARCH TOOLKIT</p>
-          <h1>Emergent Complexity <span>Life Lab</span></h1>
+        <div class="topbar-left">
+          <div class="brand">EMERGENT COMPLEXITY</div>
+          <button id="controls-toggle" class="button button-quiet button-small controls-toggle" type="button" aria-expanded="true">Controls</button>
         </div>
+        <nav class="mode-nav" aria-label="Laboratory modes">
+          <button class="mode-link active" data-mode="2d" type="button">2D</button>
+          <button class="mode-link" data-mode="3d" type="button">3D</button>
+          <button class="mode-link" data-mode="compare" type="button">Compare</button>
+          <button class="mode-link" data-mode="experiments" type="button">Runs</button>
+        </nav>
         <div id="device-chip" class="device-chip"><span class="status-dot"></span>JAX device loading</div>
       </header>
-
-      <nav class="mode-nav" aria-label="Laboratory modes">
-        <button class="mode-link active" data-mode="2d" type="button">2D Life</button>
-        <button class="mode-link" data-mode="3d" type="button">3D Life</button>
-        <button class="mode-link" data-mode="compare" type="button">Compare</button>
-        <button class="mode-link" data-mode="experiments" type="button">Experiments</button>
-      </nav>
 
       <main>
         <section id="mode-2d" class="mode-panel" aria-labelledby="mode-2d-heading">
@@ -39,7 +38,7 @@
               <div class="panel-heading">
                 <div>
                   <p class="section-kicker">2D LIFE</p>
-                  <h2 id="mode-2d-heading">Draw a world, then let it evolve.</h2>
+                  <h2 id="mode-2d-heading">2D cellular automaton</h2>
                 </div>
                 <div class="generation-pill">GEN <strong id="generation-value">0</strong></div>
               </div>
@@ -142,22 +141,19 @@
             </aside>
           </div>
 
-          <section class="panel insights-panel" aria-labelledby="metrics-heading">
-            <div class="panel-heading">
-              <div>
-                <p class="section-kicker">EVOLUTION TRACE</p>
-                <h2 id="metrics-heading">Population and activity</h2>
-              </div>
+          <details class="trace-drawer" open>
+            <summary><span>EVOLUTION TRACE</span><span class="trace-summary">Population · activity · births · deaths</span><span class="trace-toggle" aria-hidden="true">+</span></summary>
+            <div class="trace-content">
               <div class="chart-legend" aria-label="Chart legend">
                 <span class="legend-population">Population</span>
                 <span class="legend-activity">Activity</span>
                 <span class="legend-births">Births</span>
                 <span class="legend-deaths">Deaths</span>
               </div>
+              <svg id="metrics-chart" data-testid="metrics-chart" viewBox="0 0 640 310" role="img" aria-label="Population, activity, births, and deaths over generations"></svg>
+              <p class="chart-note">Live-cell fraction, changed-cell fraction, births, and deaths from the exact JAX state.</p>
             </div>
-            <svg id="metrics-chart" data-testid="metrics-chart" viewBox="0 0 640 310" role="img" aria-label="Population, activity, births, and deaths over generations"></svg>
-            <p class="chart-note">State shows live-cell fraction. Activity counts changed cells; transitions separate births from deaths for each generation.</p>
-          </section>
+          </details>
 
           <section class="metadata-strip panel" aria-label="Current 2D simulation metadata">
             <div><span>Rule</span><strong id="metadata-rule">B3/S23</strong></div>
@@ -177,7 +173,7 @@
               <div class="panel-heading">
                 <div>
                   <p class="section-kicker">3D LIFE</p>
-                  <h2 id="mode-3d-heading">Orbit the complete voxel state.</h2>
+                  <h2 id="mode-3d-heading">3D voxel automaton</h2>
                 </div>
                 <div class="generation-pill">GEN <strong id="3d-generation-value">0</strong></div>
               </div>
@@ -194,7 +190,7 @@
                 <label class="check-control" for="3d-bounds-input"><input id="3d-bounds-input" type="checkbox" checked /> <span>Bounds</span></label>
                 <label class="check-control" for="3d-performance-input"><input id="3d-performance-input" type="checkbox" /> <span>Performance</span></label>
                 <button id="3d-capture-button" class="button button-quiet button-small" type="button">Capture</button>
-                <button id="3d-export-button" class="button button-quiet button-small" type="button">Export state</button>
+                <button id="3d-export-button" class="button button-quiet button-small" type="button">Export exact NPZ</button>
                 <button id="3d-share-button" class="button button-quiet button-small" type="button">Copy link</button>
               </div>
               <div id="3d-render-warning" class="render-warning hidden">High render density - displaying a deterministic voxel sample; simulation remains exact.</div>
@@ -280,11 +276,13 @@
               </section>
             </aside>
           </div>
-          <section class="panel insights-panel" aria-labelledby="3d-metrics-heading">
-            <div class="panel-heading"><div><p class="section-kicker">EVOLUTION TRACE</p><h2 id="3d-metrics-heading">3D population and activity</h2></div><div class="chart-legend"><span class="legend-population">Population</span><span class="legend-activity">Activity</span><span class="legend-births">Births</span><span class="legend-deaths">Deaths</span></div></div>
-            <svg id="metrics-chart-3d" viewBox="0 0 640 310" role="img" aria-label="3D population, activity, births, and deaths over generations"></svg>
-            <p class="chart-note">These are descriptive transition measurements from the exact JAX state.</p>
-          </section>
+          <details class="trace-drawer" open>
+            <summary><span>EVOLUTION TRACE</span><span class="trace-summary">Population · activity · births · deaths</span><span class="trace-toggle" aria-hidden="true">+</span></summary>
+            <div class="trace-content">
+              <svg id="metrics-chart-3d" viewBox="0 0 640 310" role="img" aria-label="3D population, activity, births, and deaths over generations"></svg>
+              <p class="chart-note">Descriptive transition measurements from the exact JAX state.</p>
+            </div>
+          </details>
           <section class="metadata-strip panel" aria-label="Current 3D simulation metadata">
             <div><span>Rule</span><strong id="3d-metadata-rule">B6/S5,6,7</strong></div>
             <div><span>Grid</span><strong id="3d-metadata-grid">32 x 32 x 32</strong></div>
@@ -323,7 +321,7 @@
         </section>
 
         <section id="mode-experiments" class="mode-panel hidden" aria-labelledby="experiments-heading">
-          <section class="panel page-heading"><div><p class="section-kicker">RAW EXPERIMENTS</p><h2 id="experiments-heading">Sample rules in parallel</h2><p class="chart-note">Runs are reproducible JAX batches. Results are descriptive measurements only; no behavioral labels are assigned.</p></div><div class="experiment-actions"><button id="experiment-run" class="button button-primary" type="button">Run experiment</button><button id="experiment-export" class="button button-secondary" type="button" disabled>Export CSV</button></div></section>
+          <section class="panel page-heading"><div><p class="section-kicker">RUNS</p><h2 id="experiments-heading">Run rules in parallel</h2><p class="chart-note">Reproducible JAX batches with raw descriptive measurements.</p></div><div class="experiment-actions"><button id="experiment-run" class="button button-primary" type="button">Run</button><button id="experiment-export" class="button button-secondary" type="button" disabled>Export CSV</button></div></section>
           <section class="panel experiment-controls">
             <div class="field-grid six-up">
               <label for="experiment-dimensions">Dimensions<select id="experiment-dimensions"><option value="3">3D</option><option value="2">2D</option></select></label>

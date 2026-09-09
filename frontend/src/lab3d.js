@@ -42,17 +42,21 @@ export class ThreeLabController {
   setStatus(message, isError = false) {
     const status = byId("3d-status-message");
     status.textContent = message;
-    status.style.color = isError ? "#f39c92" : "";
+    status.classList.toggle("status-error", isError);
+    status.classList.toggle("status-success", !isError);
   }
 
   async activate() {
     this.active = true;
     if (this.initialized) {
+      this.view.start();
       this.view.resize();
       return;
     }
+    this.setStatus("Preparing 3D world...");
     try {
       await this.view.init();
+      this.view.start();
       const config = this.urlConfig();
       const state = await api.createSession3d({
         session_id: this.sessionId,
@@ -74,16 +78,23 @@ export class ThreeLabController {
   deactivate() {
     this.active = false;
     this.pause(false);
+    this.view.stop();
   }
 
   urlConfig() {
     const params = new URLSearchParams(window.location.search);
-    const fallbackSize = Math.trunc(Number(params.get("size")) || 32);
-    const dimension = (name) => Math.max(8, Math.min(128, Math.trunc(Number(params.get(name)) || fallbackSize)));
-    const densityValue = Number(params.get("density"));
+    // A 2D session may leave width/height/density in the URL. Require the
+    // 3D-specific depth field before treating those values as a 3D setup.
+    const has3dConfig = params.get("mode") === "3d" && params.has("depth");
+    const fallbackSize = Math.trunc(Number(has3dConfig ? params.get("size") : 0) || 32);
+    const dimension = (name) => Math.max(
+      8,
+      Math.min(128, Math.trunc(Number(has3dConfig ? params.get(name) : 0) || fallbackSize)),
+    );
+    const densityValue = Number(has3dConfig ? params.get("density") : NaN);
     const density = Math.max(0, Math.min(1, Number.isFinite(densityValue) ? densityValue : 0.04));
-    const seed = Math.trunc(Number(params.get("seed")) || 42);
-    const rule = params.get("rule") || "B6/S5,6,7";
+    const seed = Math.trunc(Number(has3dConfig ? params.get("seed") : 0) || 42);
+    const rule = (has3dConfig ? params.get("rule") : null) || "B6/S5,6,7";
     return { depth: dimension("depth"), height: dimension("height"), width: dimension("width"), density, seed, rule };
   }
 
@@ -166,6 +177,11 @@ export class ThreeLabController {
     sliceInput.value = String(Math.min(Number(sliceInput.value), maxIndex));
     this.updateMetricHistory(state);
     this.updatePerformance(state);
+    if (byId("3d-performance-input").checked) {
+      window.requestAnimationFrame(() => {
+        if (this.currentState === state) this.updatePerformance(state);
+      });
+    }
     if (byId("3d-slice-input").checked) this.loadSlice();
     const query = new URLSearchParams({
       mode: "3d",
@@ -184,8 +200,11 @@ export class ThreeLabController {
     byId("3d-performance-overlay").textContent = [
       `JAX device: ${state.jax_device || "server device"}`,
       `Grid cells: ${Number(state.depth * state.height * state.width).toLocaleString()}`,
-      `Simulation: ${Number(state.last_step_ms || 0).toFixed(2)} ms/request`,
-      `Rendered voxels: ${stats.renderedCount.toLocaleString()}${stats.sampled ? " (sampled)" : ""}`,
+      `Simulation: ${Number(state.simulation_ms ?? state.last_step_ms ?? 0).toFixed(2)} ms/request`,
+      `Render extract: ${Number(state.render_extract_ms || 0).toFixed(2)} ms`,
+      `Payload build: ${Number(state.serialization_ms || 0).toFixed(2)} ms`,
+      `Rendered voxels: ${stats.renderedCount.toLocaleString()} / ${Number(state.alive || 0).toLocaleString()}${stats.sampled ? " (sampled)" : ""}`,
+      `Browser render: ${stats.lastRenderMs.toFixed(2)} ms/frame`,
       `Browser FPS: ${stats.fps.toFixed(1)}`,
     ].join("\n");
   }
@@ -366,19 +385,18 @@ export class ThreeLabController {
     });
     byId("3d-capture-button").addEventListener("click", () => {
       if (!this.currentState) return;
-      this.view.capture(`3D | ${this.currentState.rule} | Generation ${this.currentState.generation} | ${this.currentState.depth}³ | Seed ${this.currentState.seed}`);
+      this.view.capture(`3D | ${this.currentState.rule} | Generation ${this.currentState.generation} | ${this.currentState.depth}^3 | Seed ${this.currentState.seed}`);
     });
     byId("3d-export-button").addEventListener("click", async () => {
       try {
-        const state = await api.exportState3d(this.sessionId);
-        const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
+        const download = await api.exportState3d(this.sessionId);
+        const url = URL.createObjectURL(download.blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `life-lab-3d-gen-${state.generation}.json`;
+        link.download = download.filename;
         link.click();
         URL.revokeObjectURL(url);
-        this.setStatus("Exported voxel coordinates and metadata");
+        this.setStatus("Exported exact 3D state as NPZ");
       } catch (error) {
         this.setStatus(error.message, true);
       }

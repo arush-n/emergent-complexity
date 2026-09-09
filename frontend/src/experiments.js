@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 
 const byId = (id) => document.getElementById(id);
+const BROWSER_MAX_CELL_UPDATES = 100_000_000;
 
 function numberValue(id, fallback) {
   const value = Number(byId(id).value);
@@ -10,6 +11,10 @@ function numberValue(id, fallback) {
 function csvValue(value) {
   const text = String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function estimateWork(dimensions, rules, initialConditions, size, steps) {
+  return rules * initialConditions * size ** Number(dimensions) * steps;
 }
 
 export class ExperimentController {
@@ -30,10 +35,18 @@ export class ExperimentController {
     const steps = Math.trunc(numberValue("experiment-steps", 50));
     const density = numberValue("experiment-density", 0.1);
     const seed = Math.trunc(numberValue("experiment-seed", 42));
+    const work = estimateWork(dimensions, rules, initialConditions, size, steps);
+    const progress = byId("experiment-progress");
+    if (work > BROWSER_MAX_CELL_UPDATES) {
+      progress.className = "status-message status-error";
+      progress.textContent = `This run is too large for the interactive server (${work.toLocaleString()} estimated cell-updates). Use the CLI experiment runner.`;
+      return;
+    }
     const runButton = byId("experiment-run");
     runButton.disabled = true;
     byId("experiment-export").disabled = true;
-    byId("experiment-progress").textContent = `Running ${rules} rules x ${initialConditions} initial states on JAX...`;
+    progress.className = "status-message status-running";
+    progress.textContent = "Running experiment...";
     try {
       const result = dimensions === "3"
         ? await api.experiment3d({ rules, initial_conditions: initialConditions, size, steps, density, seed })
@@ -42,10 +55,11 @@ export class ExperimentController {
       this.renderTable();
       byId("experiment-export").disabled = !this.rows.length;
       byId("experiment-summary").textContent = `${rules} rules | ${this.rows.length} simulations`;
-      byId("experiment-progress").textContent = `Rules completed: ${rules} / ${rules} | Simulations: ${this.rows.length} / ${rules * initialConditions}`;
+      progress.className = "status-message status-success";
+      progress.textContent = `Completed ${rules} rules and ${this.rows.length} simulations.`;
     } catch (error) {
-      byId("experiment-progress").textContent = `Experiment failed: ${error.message}`;
-      byId("experiment-progress").style.color = "#f39c92";
+      progress.className = "status-message status-error";
+      progress.textContent = `Experiment failed: ${error.message}`;
     } finally {
       runButton.disabled = false;
     }

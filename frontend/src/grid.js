@@ -63,10 +63,10 @@ export class GridCanvas {
     const offsetY = (cssHeight - cellSize * this.height) / 2;
     const context = this.context;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    context.fillStyle = "#050910";
+    context.fillStyle = "#050505";
     context.fillRect(0, 0, cssWidth, cssHeight);
 
-    context.fillStyle = "#d8fff0";
+    context.fillStyle = "#eeede5";
     for (let row = 0; row < this.height; row += 1) {
       for (let col = 0; col < this.width; col += 1) {
         if (this.grid[row]?.[col]) {
@@ -77,7 +77,7 @@ export class GridCanvas {
 
     if (this.showGrid && cellSize >= 3) {
       context.beginPath();
-      context.strokeStyle = "rgba(106, 153, 189, .16)";
+      context.strokeStyle = "#252523";
       context.lineWidth = 1;
       for (let col = 0; col <= this.width; col += 1) {
         const x = Math.round(offsetX + col * cellSize) + 0.5;
@@ -146,4 +146,3 @@ export class GridCanvas {
     this.visited.clear();
   }
 }
-

@@ -1,7 +1,2 @@
-jax>=0.4.30
-numpy>=1.26
-fastapi>=0.110
-uvicorn[standard]>=0.27
-httpx>=0.27
-pytest>=8.0
-ruff>=0.6
+-c constraints.txt
+-e .[dev]

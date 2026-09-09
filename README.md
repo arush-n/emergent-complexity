@@ -6,7 +6,9 @@ It deliberately does not classify rules or implement research analysis, machine 
 
 ## Install
 
-Python 3.11 or newer is recommended.
+Python 3.12 is the deployment baseline. Python 3.11 through 3.14 are accepted
+by the package metadata, with CI targeting 3.12 and 3.13. The local
+verification environment is Python 3.11.9.
 
 ```bash
 python -m venv .venv
@@ -15,10 +17,23 @@ source .venv/bin/activate
 # Windows PowerShell
 # .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -c constraints.txt -e ".[dev]"
 ```
 
-The default dependency is CPU-capable JAX. Installing an accelerator-specific JAX build later is optional; the code does not assume CUDA or any particular device.
+For browser smoke tests and the browser benchmark, install the optional
+Playwright dependency and its browser once:
+
+```bash
+python -m pip install -c constraints.txt -e ".[dev,browser]"
+python -m playwright install chromium
+```
+
+The tested CPU baseline recorded in `constraints.txt` is JAX 0.10.2,
+NumPy 2.4.6, FastAPI 0.141.1, and Uvicorn 0.52.4. The declared ranges in
+`pyproject.toml` allow newer compatible JAX releases without making the
+documented environment ambiguous. Installing an accelerator-specific JAX
+build later is optional; the code does not assume CUDA or any particular
+device.
 
 ## Run the simulator
 
@@ -34,7 +49,11 @@ python -m emergent.server.app
 
 Open <http://127.0.0.1:8000>. The first JAX operation may take a moment while the shape-specific computation is compiled.
 
-The site is a client of the Python API. Drawing, rule editing, playback, reset, randomization, and export all go through the backend; the cellular-automaton transition itself remains in JAX. Three.js/WebGL renders living 3D voxels with one `InstancedMesh`, while exact cross-sections are requested separately from the server.
+The site is a client of the Python API. Drawing, rule editing, playback, reset,
+randomization, and export all go through the backend; the cellular-automaton
+transition itself remains in JAX. Three.js/WebGL renders living 3D voxels with
+one persistent `InstancedMesh`, while exact cross-sections are requested
+separately from the server.
 
 The Evolution Trace panel is a lightweight diagnostic view, not a research
 classifier. It plots the live-cell fraction and the fraction of cells changed
@@ -49,6 +68,10 @@ generations per second without making one HTTP request per generation.
 The repository includes a CPU Docker deployment and a `render.yaml` Blueprint.
 The container serves both the FastAPI backend and the static frontend, so the
 browser still talks to the same-origin `/api` endpoints.
+
+GitHub is the source repository and CI host. GitHub Pages alone cannot run the
+JAX/FastAPI backend, so use the included Render Blueprint (or another Docker
+host) for a live full application.
 
 Run the same image locally:
 
@@ -66,11 +89,32 @@ database or external service is required; sessions remain in process memory.
 
 ```bash
 pytest
+ruff check .
 python benchmarks/benchmark_step.py
 python benchmarks/benchmark_3d.py --max-size 128 --steps 20
 ```
 
-The benchmarks warm the JIT and call `block_until_ready()` before timing. The 3D benchmark separates compile time from steady-state milliseconds per generation, increases sizes gradually, and writes CSV/JSON results under `artifacts/benchmarks/`. Use `--max-memory-gb` to set a conservative allocation limit.
+The benchmarks call `block_until_ready()` before timing. The 3D engine
+benchmark lowers and compiles each shape separately, reports compilation and
+steady-state timings independently, records process memory when available, and
+increases sizes gradually. It writes CSV/JSON results under
+`artifacts/benchmarks/`. Use `--max-memory-gb` to set a conservative allocation
+limit.
+
+The interactive pipeline benchmark measures JAX/server stepping separately from
+render extraction, payload construction, and JSON encoding:
+
+```bash
+python benchmarks/benchmark_3d_end_to_end.py --mode server --size 64 --steps 10
+```
+
+With a running local server and Playwright installed, the browser path measures
+real Chromium step interactions:
+
+```bash
+python tests/browser_smoke.py
+python benchmarks/benchmark_3d_end_to_end.py --mode browser --steps 1
+```
 
 For reproducible raw 3D rule sweeps:
 
@@ -99,7 +143,8 @@ src/emergent/server/      FastAPI models, separate 2D/3D in-memory sessions, HTT
 frontend/                 static HTML/CSS/JS UI, SVG diagnostics, Canvas, and WebGL voxel view
 tests/                    numerical, persistence, batching, and API tests
 examples/                 importable Python usage examples
-benchmarks/               warm-JIT timing script
+benchmarks/               engine and server/browser pipeline benchmarks
+.github/workflows/        CI for the tested Python versions and JS syntax
 ```
 
 The `emergent.rules`, `emergent.random`, and `emergent.simulate` modules re-export the 2D API so compact examples remain convenient. The 3D API is available from `emergent.core3d`, `emergent.three_d`, or the package root with explicit `_3d` names. The canonical implementations are under `emergent.core` and `emergent.core3d`.
@@ -132,7 +177,9 @@ Presets are available as `CONWAY = "B3/S23"` and `HIGHLIFE = "B36/S23"`.
 
 ## 3D rules and API
 
-3D grids use shape `(depth, height, width)`, uint8 state values, toroidal boundaries, and all 26 cells in the surrounding 3 x 3 x 3 cube. A `Rule3D` has two masks of length 27. Counts 0 through 9 may use compact notation for convenience, but the formatter always emits unambiguous comma-separated counts:
+3D grids use shape `(depth, height, width)`, uint8 state values, toroidal
+boundaries, and all 26 cells in the surrounding 3 x 3 x 3 cube. A `Rule3D` has
+two masks of length 27. Canonical notation is comma-separated and unambiguous:
 
 ```python
 import jax
@@ -151,20 +198,34 @@ print(trajectory.shape)  # (11, 32, 32, 32)
 
 For only the endpoint, use `run_steps_3d`. For many initial states, use `run_steps_batch_3d` with `(batch, depth, height, width)` input. `generate_batched_trajectory_3d` returns `(batch, time, depth, height, width)` and supports `record_every` so full 3D histories are only retained when explicitly requested. `simulate_rules_3d` returns `(rule, batch, depth, height, width)` final states.
 
-3D rules have 54 independent decisions and can be encoded with `rule_to_int_3d`/`int_to_rule_3d` in `[0, 2**54)`. `random_rule_3d` and `random_rules_3d` use explicit JAX keys and never enumerate that space.
+Legacy single-digit compact sections such as `B6/S567` remain accepted. A
+two-digit compact section such as `B10/S10` is accepted only when it is one
+complete count; use commas whenever a section contains multiple two-digit
+counts. Formatters always return comma-separated notation. 3D rules have 54
+independent decisions and can be encoded with
+`rule_to_int_3d`/`int_to_rule_3d` in `[0, 2**54)`. `random_rule_3d` and
+`random_rules_3d` use explicit JAX keys and never enumerate that space.
 
-The 3D Python persistence helpers are `save_state_3d`/`load_state_3d` for complete JSON or NPZ states, and `save_grid_3d`/`load_grid_3d` for standalone arrays. The browser's 3D export is intentionally coordinate-based and capped for rendering safety; it does not replace the full Python NPZ format.
+The 3D Python persistence helpers are `save_state_3d`/`load_state_3d` for
+complete JSON or NPZ states, and `save_grid_3d`/`load_grid_3d` for standalone
+arrays. The browser's **Export exact NPZ** endpoint contains the complete JAX
+grid. The separate `export-view` endpoint is explicitly capped render data and
+is not an exact state export.
 
 ## Website workflow
 
 The top navigation switches between:
 
-- `2D Life`: draw cells on Canvas, run Conway/HighLife/arbitrary rules, inspect population/activity/birth/death traces, and save/load JSON.
-- `3D Life`: inspect a JAX-backed voxel state with orbit/pan/zoom camera controls, bounds, front/side/top views, a 27-count rule editor, exact X/Y/Z slice view, deterministic randomization, fixed-point runs, capture, and configuration-link copying.
+- `2D`: draw cells on Canvas, run Conway/HighLife/arbitrary rules, inspect population/activity/birth/death traces, and save/load JSON.
+- `3D`: inspect a JAX-backed voxel state with orbit/pan/zoom camera controls, bounds, front/side/top views, a 27-count rule editor, exact X/Y/Z slice view, deterministic randomization, fixed-point runs, capture, and configuration-link copying.
 - `Compare`: advance independent 2D and 3D sessions side by side with shared seed/density controls and separately chosen rules.
-- `Experiments`: run small raw random-rule batches, filter/sort results, export CSV, and open a selected rule in the relevant simulator.
+- `Runs`: run small raw random-rule batches, filter/sort results, export CSV, and open a selected rule in the relevant simulator.
 
-The 3D browser view loads Three.js from a pinned public CDN module. The Python numerical engine and all experiment runners work without the website.
+The 3D browser view loads Three.js r185 from a pinned public CDN module. The
+renderer keeps geometry/material allocations alive between state updates,
+renders on demand while its mode is active, and makes sampling visible when
+the render cap is exceeded. The Python numerical engine and all experiment
+runners work without the website.
 
 ## Python API
 
@@ -233,8 +294,17 @@ next_batch = batched_step(initial_grids, birth, survival)
 
 ## Persistence and patterns
 
-`save_state`/`load_state` support complete `.json` and metadata-bearing `.npz` states. `save_grid`/`load_grid` support standalone `.npy` and `.npz` grids. JSON is also the browser export format. `block`, `blinker`, and `glider` are available from `emergent.io.patterns`; `place_pattern` returns a new grid and never mutates its input.
+`save_state`/`load_state` support complete `.json` and metadata-bearing `.npz`
+states. `save_grid`/`load_grid` support standalone `.npy` and `.npz` grids.
+`block`, `blinker`, and `glider` are available from `emergent.io.patterns`;
+`place_pattern` returns a new grid and never mutates its input.
 
 ## Known limitations
 
-The server uses in-memory single-process session stores. It has no authentication, database, distributed execution, or multi-user coordination. 3D browser rendering transmits living coordinates and explicitly samples only the visualization when a configurable cap is exceeded; JAX continues simulating the complete grid. A fresh shape intentionally creates a new session and may trigger a shape-specific JAX compilation. The browser's 3D export is compact coordinate metadata; use Python NPZ/JSON persistence for a complete dense 3D state.
+The server uses in-memory single-process session stores. It has no
+authentication, database, distributed execution, or multi-user coordination.
+3D browser rendering transmits living coordinates and explicitly samples only
+the visualization when a configurable cap is exceeded; JAX continues
+simulating the complete grid. A fresh shape intentionally creates a new
+session and may trigger a shape-specific JAX compilation. Large experiment
+sweeps should use the CLI runner rather than the synchronous browser endpoint.
