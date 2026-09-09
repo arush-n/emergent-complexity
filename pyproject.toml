@@ -9,7 +9,8 @@ description = "A JAX cellular-automata laboratory for reproducible experiments."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 license = { text = "MIT" }
-authors = [{ name = "Emergent Complexity Lab" }]
+authors = [{ name = "arush-n" }]
+urls = { Homepage = "https://arush-n.github.io/emergent-complexity/", Repository = "https://github.com/arush-n/emergent-complexity", Issues = "https://github.com/arush-n/emergent-complexity/issues" }
 dependencies = [
     "jax>=0.10.2,<0.12",
     "numpy>=2.4,<2.5",

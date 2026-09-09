@@ -96,6 +96,9 @@ summary:focus-visible {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   overflow: hidden;
   color: var(--text);
   font-size: 13px;
@@ -104,6 +107,29 @@ summary:focus-visible {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.glider-mark {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, 4px);
+  grid-template-rows: repeat(3, 4px);
+  gap: 1px;
+}
+
+.glider-mark i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  background: transparent;
+}
+
+.glider-mark i:nth-child(2),
+.glider-mark i:nth-child(5),
+.glider-mark i:nth-child(6),
+.glider-mark i:nth-child(7),
+.glider-mark i:nth-child(8) {
+  background: var(--accent);
 }
 
 .mode-nav {
@@ -632,6 +658,51 @@ output {
   font-size: 11px;
 }
 
+.viewport-menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.viewport-menu > summary {
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  list-style: none;
+}
+
+.viewport-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.viewport-menu[open] > summary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.viewport-menu-content {
+  position: absolute;
+  z-index: 7;
+  top: calc(100% + 5px);
+  right: 0;
+  display: flex;
+  min-width: 160px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  background: rgba(17, 17, 16, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.viewport-menu-content .check-control {
+  padding: 5px 3px;
+}
+
 .performance-overlay {
   position: absolute;
   top: 12px;
@@ -800,7 +871,7 @@ output {
 
 .metadata-strip {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   margin-left: var(--sidebar-width);
   border-width: 1px 0 0;

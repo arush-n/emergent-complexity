@@ -3,7 +3,7 @@ export class GridCanvas {
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
     this.onCommit = onCommit || (() => {});
-    this.grid = [];
+    this.grid = new Uint8Array();
     this.width = 0;
     this.height = 0;
     this.mode = "toggle";
@@ -24,8 +24,18 @@ export class GridCanvas {
   setState(grid, width, height) {
     this.width = width;
     this.height = height;
-    this.grid = grid.map((row) => row.slice());
+    if (grid instanceof Uint8Array) {
+      this.grid = new Uint8Array(grid);
+    } else {
+      this.grid = Uint8Array.from(grid.flatMap((row) => row));
+    }
     this.render();
+  }
+
+  toRows() {
+    return Array.from({ length: this.height }, (_, row) =>
+      Array.from(this.grid.slice(row * this.width, (row + 1) * this.width)),
+    );
   }
 
   setMode(mode) {
@@ -69,7 +79,7 @@ export class GridCanvas {
     context.fillStyle = "#eeede5";
     for (let row = 0; row < this.height; row += 1) {
       for (let col = 0; col < this.width; col += 1) {
-        if (this.grid[row]?.[col]) {
+        if (this.grid[row * this.width + col]) {
           context.fillRect(offsetX + col * cellSize, offsetY + row * cellSize, cellSize, cellSize);
         }
       }
@@ -114,9 +124,10 @@ export class GridCanvas {
     this.visited.add(key);
     const erase = this.pointerButton === 2 || this.mode === "erase";
     const paint = this.mode === "paint" && this.pointerButton !== 2;
-    if (erase) this.grid[cell.row][cell.col] = 0;
-    else if (paint) this.grid[cell.row][cell.col] = 1;
-    else this.grid[cell.row][cell.col] = this.grid[cell.row][cell.col] ? 0 : 1;
+    const index = cell.row * this.width + cell.col;
+    if (erase) this.grid[index] = 0;
+    else if (paint) this.grid[index] = 1;
+    else this.grid[index] = this.grid[index] ? 0 : 1;
     this.dirty = true;
     this.render();
   }
@@ -142,7 +153,7 @@ export class GridCanvas {
     if (!this.dragging) return;
     this.dragging = false;
     this.canvas.releasePointerCapture?.(event.pointerId);
-    if (this.dirty) this.onCommit(this.grid.map((row) => row.slice()));
+    if (this.dirty) this.onCommit(this.toRows());
     this.visited.clear();
   }
 }

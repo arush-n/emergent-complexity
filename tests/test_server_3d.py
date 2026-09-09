@@ -30,7 +30,14 @@ def test_api_3d_session_lifecycle() -> None:
     assert state["dimensions"] == 3
     assert state["grid_shape"] == [8, 8, 8]
     assert state["alive"] == 0
-    assert state["voxels"] == []
+    assert "voxels" not in state
+    assert "speed" not in state
+    assert "running" not in state
+
+    rendered = client.get("/api/3d/render", params={"session_id": "test-3d"})
+    assert rendered.status_code == 200
+    assert rendered.content == b""
+    assert rendered.headers["x-voxel-encoding"] == "uint8-xyz-triples"
 
     randomised = client.post(
         "/api/3d/randomize",
@@ -38,15 +45,16 @@ def test_api_3d_session_lifecycle() -> None:
     )
     assert randomised.status_code == 200
     assert randomised.json()["alive"] == 512
-    assert randomised.json()["render_sampled"] is False
+    full_render = client.get("/api/3d/render", params={"session_id": "test-3d"})
+    assert full_render.headers["x-render-sampled"] == "false"
     sampled = client.get(
-        "/api/3d/state",
+        "/api/3d/render",
         params={"session_id": "test-3d", "max_voxels": 10},
     )
     assert sampled.status_code == 200
-    assert sampled.json()["alive"] == 512
-    assert sampled.json()["rendered_voxels"] == 10
-    assert sampled.json()["render_sampled"] is True
+    assert len(sampled.content) == 30
+    assert sampled.headers["x-rendered-voxels"] == "10"
+    assert sampled.headers["x-render-sampled"] == "true"
 
     changed_rule = client.post(
         "/api/3d/rule",
@@ -190,7 +198,7 @@ def test_api_3d_slices_are_exact_for_all_axes_and_transfer_only_a_plane(monkeypa
     assert transferred_shapes == [(4, 5), (3, 5), (3, 4)]
 
 
-def test_api_3d_render_payload_transfers_the_volume_once(monkeypatch) -> None:
+def test_api_3d_metadata_and_render_are_separate() -> None:
     store = SessionStore3D()
     store.create(
         depth=3,
@@ -203,19 +211,13 @@ def test_api_3d_render_payload_transfers_the_volume_once(monkeypatch) -> None:
     )
     session = store.get("payload-3d")
     session.grid = session.grid.at[1, 2, 3].set(1)
-    original_device_get = sessions_3d_module.jax.device_get
-    transferred_shapes = []
-
-    def record_shape(value):
-        transferred_shapes.append(tuple(value.shape))
-        return original_device_get(value)
-
-    monkeypatch.setattr(sessions_3d_module.jax, "device_get", record_shape)
     payload = store.payload("payload-3d")
 
     assert payload["alive"] == 1
-    assert payload["rendered_voxels"] == 1
-    assert transferred_shapes == [(3, 4, 5)]
+    assert "voxels" not in payload
+    content, metadata = store.render_bytes("payload-3d")
+    assert len(content) == 3
+    assert metadata["rendered_voxels"] == 1
 
 
 def test_api_3d_export_is_an_exact_npz_and_view_export_is_explicit() -> None:

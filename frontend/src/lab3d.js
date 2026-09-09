@@ -70,7 +70,7 @@ export class ThreeLabController {
       });
       this.initialized = true;
       this.renderState(state);
-      this.setStatus("Ready - deterministic 3D seed 42");
+      this.setStatus(`Ready - 3D seed ${state.seed}`);
     } catch (error) {
       this.setStatus(`3D backend unavailable: ${error.message}`, true);
     }
@@ -156,21 +156,17 @@ export class ThreeLabController {
     this.ruleEditor.setRule(state.rule);
     byId("3d-generation-value").textContent = String(state.generation);
     byId("3d-metadata-rule").textContent = state.rule;
-    byId("3d-metadata-grid").textContent = `${state.depth} x ${state.height} x ${state.width}`;
     byId("3d-metadata-generation").textContent = String(state.generation);
     byId("3d-metadata-alive").textContent = Number(state.alive).toLocaleString();
-    byId("3d-metadata-changed").textContent = Number(state.changed_cells || 0).toLocaleString();
-    byId("3d-metadata-births").textContent = Number(state.births || 0).toLocaleString();
-    byId("3d-metadata-deaths").textContent = Number(state.deaths || 0).toLocaleString();
-    byId("3d-metadata-density").textContent = Number(state.alive_fraction).toFixed(4);
+    byId("3d-metadata-activity").textContent = `${(Number(state.changed_fraction || 0) * 100).toFixed(2)}%`;
     byId("3d-depth-input").value = state.depth;
     byId("3d-height-input").value = state.height;
     byId("3d-width-input").value = state.width;
-    byId("3d-density-input").value = String(state.density ?? 0.04);
-    byId("3d-density-value").textContent = Number(state.density ?? 0.04).toFixed(2);
-    byId("3d-seed-input").value = state.seed ?? 42;
-    byId("3d-speed-input").value = String(state.speed ?? 10);
-    byId("3d-speed-value").textContent = `${Number(state.speed ?? 10).toFixed(0)} gen/s`;
+    const initialDensity = state.initial_density ?? state.density ?? 0.04;
+    byId("3d-density-input").value = String(initialDensity);
+    byId("3d-density-value").textContent = Number(initialDensity).toFixed(2);
+    byId("3d-seed-input").value = state.seed ?? "";
+    byId("3d-speed-value").textContent = `${Number(byId("3d-speed-input").value || 10).toFixed(0)} gen/s`;
     const axis = byId("3d-axis-input").value;
     const maxIndex = { z: state.depth, y: state.height, x: state.width }[axis] - 1;
     const sliceInput = byId("3d-slice-index");
@@ -190,8 +186,8 @@ export class ThreeLabController {
       depth: String(state.depth),
       height: String(state.height),
       width: String(state.width),
-      density: String(state.density),
-      seed: String(state.seed ?? 42),
+      density: String(initialDensity),
+      seed: String(state.seed),
     });
     window.history.replaceState({}, "", `?${query.toString()}`);
   }
@@ -365,7 +361,6 @@ export class ThreeLabController {
     });
     byId("3d-speed-input").addEventListener("input", (event) => {
       byId("3d-speed-value").textContent = `${Number(event.target.value).toFixed(0)} gen/s`;
-      if (this.currentState) api.setSpeed3d(this.sessionId, Number(event.target.value)).catch(() => {});
     });
     byId("3d-density-input").addEventListener("input", (event) => {
       byId("3d-density-value").textContent = Number(event.target.value).toFixed(2);

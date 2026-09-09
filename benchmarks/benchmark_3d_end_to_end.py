@@ -2,8 +2,8 @@
 
 This is intentionally separate from ``benchmark_3d.py``. The engine benchmark
 answers how quickly JAX advances a volume; this script measures the additional
-cost of extracting living coordinates, building a response, and optionally
-round-tripping a browser step through the running application.
+cost of extracting living coordinates, serializing compact render bytes, and
+optionally round-tripping a browser step through the running application.
 
 Examples::
 
@@ -54,10 +54,14 @@ def benchmark_server_pipeline(
     for _ in range(repeats):
         step_start = time.perf_counter()
         store.step(session_id, steps=steps)
-        payload = store.payload(session_id, max_voxels=max_voxels)
-        wire_start = time.perf_counter()
-        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        wire_ms = (time.perf_counter() - wire_start) * 1000
+        payload = store.payload(session_id)
+        render_content, render_metadata = store.render_bytes(
+            session_id,
+            max_voxels=max_voxels,
+        )
+        metadata_start = time.perf_counter()
+        encoded_metadata = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        metadata_ms = (time.perf_counter() - metadata_start) * 1000
         end_to_end_ms = (time.perf_counter() - step_start) * 1000
         rows.append(
             {
@@ -67,17 +71,18 @@ def benchmark_server_pipeline(
                 "steps": steps,
                 "jax_device": str(jax.devices()[0]),
                 "simulation_ms": payload["simulation_ms"],
-                "render_extract_ms": payload["render_extract_ms"],
-                "payload_build_ms": payload["serialization_ms"],
-                "wire_serialization_ms": wire_ms,
+                "render_extract_ms": render_metadata["render_extract_ms"],
+                "binary_serialization_ms": render_metadata["serialization_ms"],
+                "metadata_json_serialization_ms": metadata_ms,
                 "end_to_end_ms": end_to_end_ms,
                 "generations_per_second": steps / (end_to_end_ms / 1000)
                 if end_to_end_ms
                 else 0.0,
                 "alive": payload["alive"],
-                "rendered_voxels": payload["rendered_voxels"],
-                "render_sampled": payload["render_sampled"],
-                "json_bytes": len(encoded),
+                "rendered_voxels": render_metadata["rendered_voxels"],
+                "render_sampled": render_metadata["render_sampled"],
+                "binary_bytes": len(render_content),
+                "metadata_json_bytes": len(encoded_metadata),
             }
         )
     return rows
@@ -107,6 +112,7 @@ def benchmark_browser(*, url: str, steps: int, repeats: int) -> list[dict[str, A
         page.wait_for_function(
             "() => document.getElementById('3d-status-message').textContent.includes('Ready')"
         )
+        page.locator('[id="3d-view-menu"] summary').click()
         page.locator('[id="3d-performance-input"]').check()
 
         page.locator('[id="3d-step-button"]').click()

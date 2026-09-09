@@ -184,14 +184,17 @@ export class ThreeVoxelView {
     this.pendingVoxels = null;
 
     const [depth, height, width] = this.dimensions;
-    const count = Math.min(voxels.length, this.maxVoxels);
+    const coordinateCount = voxels instanceof Uint8Array ? voxels.length / 3 : voxels.length;
+    const count = Math.min(coordinateCount, this.maxVoxels);
     this.ensureMesh(count, dimensionsChanged);
     this.renderedCount = count;
     if (this.mesh) {
       const matrix = new this.THREE.Matrix4();
       this.mesh.count = count;
       for (let index = 0; index < count; index += 1) {
-        const [z, y, x] = voxels[index];
+        const [z, y, x] = voxels instanceof Uint8Array
+          ? [voxels[index * 3], voxels[index * 3 + 1], voxels[index * 3 + 2]]
+          : voxels[index];
         matrix.setPosition(
           x - width / 2 + 0.5,
           height / 2 - y - 0.5,

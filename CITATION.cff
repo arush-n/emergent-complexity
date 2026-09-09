@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+title: "Emergent Complexity Cellular Automata Lab"
+message: "If this software supports your work, please cite the repository."
+type: software
+authors:
+  - name: arush-n
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/arush-n/emergent-complexity"
+url: "https://arush-n.github.io/emergent-complexity/"

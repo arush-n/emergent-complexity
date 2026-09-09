@@ -22,6 +22,9 @@ def test_api_session_lifecycle() -> None:
     assert state["session_id"] == "test"
     assert state["alive"] == 0
     assert state["changed_cells"] == 0
+    assert "grid" not in state
+    assert "speed" not in state
+    assert "running" not in state
 
     drawn = [[0] * 8 for _ in range(8)]
     drawn[3][3] = 1
@@ -83,6 +86,25 @@ def test_api_session_lifecycle() -> None:
     assert stabilized.json()["alive"] == 0
 
 
+def test_api_2d_render_is_little_endian_bitpacked() -> None:
+    client = TestClient(create_app(SessionStore()))
+    created = client.post(
+        "/api/session",
+        json={"session_id": "packed", "width": 8, "height": 8, "density": 0, "seed": 42},
+    )
+    assert created.status_code == 200
+    drawn = [[0] * 8 for _ in range(8)]
+    drawn[0][0] = 1
+    drawn[1][3] = 1
+    client.put("/api/state", json={"session_id": "packed", "grid": drawn})
+    rendered = client.get("/api/render", params={"session_id": "packed"})
+    assert rendered.status_code == 200
+    assert rendered.headers["x-grid-encoding"] == "packbits-little"
+    assert len(rendered.content) == 8
+    assert rendered.content[0] & 1
+    assert rendered.content[1] & (1 << 3)
+
+
 def test_api_rejects_oversized_step_and_stability_requests() -> None:
     client = TestClient(create_app(SessionStore()))
     created = client.post(
@@ -113,6 +135,16 @@ def test_api_does_not_enable_wildcard_cors() -> None:
         },
     )
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_api_resolves_null_seed_to_actual_reproducible_integer() -> None:
+    client = TestClient(create_app(SessionStore()))
+    response = client.post(
+        "/api/session",
+        json={"session_id": "random-seed", "width": 8, "height": 8, "density": 0, "seed": None},
+    )
+    assert response.status_code == 200
+    assert isinstance(response.json()["seed"], int)
 
 
 def test_api_2d_experiment_computes_without_writing_files(tmp_path) -> None:

@@ -51,9 +51,10 @@ Open <http://127.0.0.1:8000>. The first JAX operation may take a moment while th
 
 The site is a client of the Python API. Drawing, rule editing, playback, reset,
 randomization, and export all go through the backend; the cellular-automaton
-transition itself remains in JAX. Three.js/WebGL renders living 3D voxels with
-one persistent `InstancedMesh`, while exact cross-sections are requested
-separately from the server.
+transition itself remains in JAX. Playback speed and running state stay in the
+browser. 2D visible states use little-endian bit-packed binary render payloads;
+Three.js/WebGL receives compact unsigned-byte voxel triples, while exact
+cross-sections are requested separately from the server.
 
 The Evolution Trace panel is a lightweight diagnostic view, not a research
 classifier. It plots the live-cell fraction and the fraction of cells changed
@@ -70,8 +71,9 @@ The container serves both the FastAPI backend and the static frontend, so the
 browser still talks to the same-origin `/api` endpoints.
 
 GitHub is the source repository and CI host. GitHub Pages alone cannot run the
-JAX/FastAPI backend, so use the included Render Blueprint (or another Docker
-host) for a live full application.
+JAX/FastAPI backend, so use the included Render Blueprint for the backend and
+set the `PUBLIC_API_BASE` repository variable before the Pages workflow runs.
+The deployment details are in [`docs/deployment.md`](docs/deployment.md).
 
 Run the same image locally:
 
@@ -102,7 +104,7 @@ increases sizes gradually. It writes CSV/JSON results under
 limit.
 
 The interactive pipeline benchmark measures JAX/server stepping separately from
-render extraction, payload construction, and JSON encoding:
+render extraction, compact binary serialization, and metadata JSON encoding:
 
 ```bash
 python benchmarks/benchmark_3d_end_to_end.py --mode server --size 64 --steps 10
@@ -139,7 +141,7 @@ src/emergent/core/        pure JAX 2D grids, rules, transitions, scans, PRNG, me
 src/emergent/core3d/      pure JAX 3D grids, 26-neighbor rules, scans, batching, PRNG
 src/emergent/experiments/ small sampling, raw rule sweeps, and dimension comparisons
 src/emergent/io/          2D/3D patterns plus JSON/NPY/NPZ persistence
-src/emergent/server/      FastAPI models, separate 2D/3D in-memory sessions, HTTP adapter
+src/emergent/server/      FastAPI assembly, dimension-specific routers, and sessions
 frontend/                 static HTML/CSS/JS UI, SVG diagnostics, Canvas, and WebGL voxel view
 tests/                    numerical, persistence, batching, and API tests
 examples/                 importable Python usage examples
@@ -147,7 +149,14 @@ benchmarks/               engine and server/browser pipeline benchmarks
 .github/workflows/        CI for the tested Python versions and JS syntax
 ```
 
-The `emergent.rules`, `emergent.random`, and `emergent.simulate` modules re-export the 2D API so compact examples remain convenient. The 3D API is available from `emergent.core3d`, `emergent.three_d`, or the package root with explicit `_3d` names. The canonical implementations are under `emergent.core` and `emergent.core3d`.
+More focused notes live in [`docs/`](docs/): architecture, rules, experiments,
+benchmarks, frontend behavior, deployment, and reproducibility.
+
+For new code, use `emergent.core` for the 2D API and `emergent.core3d` for the
+3D API. The `emergent.rules`, `emergent.random`, `emergent.simulate`,
+`emergent.three_d`, and package-root exports remain compatibility conveniences
+for existing examples; the canonical implementations are under `emergent.core`
+and `emergent.core3d`.
 
 ## Rule representation
 

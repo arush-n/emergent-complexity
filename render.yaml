@@ -4,3 +4,6 @@ services:
     runtime: docker
     plan: free
     healthCheckPath: /api/health
+    envVars:
+      - key: EMERGENT_CORS_ORIGINS
+        value: https://arush-n.github.io

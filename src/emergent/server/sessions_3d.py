@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..core.random import key_from_seed
-from ..core3d.measurements import transition_counts_3d
+from ..core3d.measurements import alive_count_3d, alive_fraction_3d, transition_counts_3d
 from ..core3d.random import random_grid_3d, random_rule_3d
 from ..core3d.rules import Rule3D, format_rule_3d, parse_rule_3d
 from ..core3d.simulate import (
@@ -22,6 +22,7 @@ from ..core3d.simulate import (
     run_steps_with_metrics_3d,
     run_until_stable_with_metrics_3d,
 )
+from .session_store import SessionLifecycle, resolve_seed
 
 
 @dataclass
@@ -32,10 +33,8 @@ class SimulationSession3D:
     initial_grid: jax.Array
     rule: Rule3D
     generation: int = 0
-    seed: int | None = 42
-    density: float = 0.04
-    speed: float = 10.0
-    running: bool = False
+    seed: int = 42
+    initial_density: float = 0.04
     changed_cells: int = 0
     births: int = 0
     deaths: int = 0
@@ -60,7 +59,7 @@ class SimulationSession3D:
         return self.depth * self.height * self.width
 
 
-class SessionStore3D:
+class SessionStore3D(SessionLifecycle):
     """A bounded, expiring in-memory store for one server process."""
 
     def __init__(
@@ -70,51 +69,12 @@ class SessionStore3D:
         session_ttl_seconds: float = 3600.0,
         clock: Callable[[], float] = monotonic,
     ) -> None:
-        if max_sessions < 1:
-            raise ValueError("max_sessions must be positive")
-        if session_ttl_seconds <= 0:
-            raise ValueError("session_ttl_seconds must be positive")
         self._sessions: dict[str, SimulationSession3D] = {}
-        self._last_access: dict[str, float] = {}
-        self._max_sessions = max_sessions
-        self._session_ttl_seconds = float(session_ttl_seconds)
-        self._clock = clock
-
-    @property
-    def session_count(self) -> int:
-        """Return the number of sessions currently retained by the store."""
-
-        self._prune()
-        return len(self._sessions)
-
-    def _remove(self, identifier: str) -> None:
-        self._sessions.pop(identifier, None)
-        self._last_access.pop(identifier, None)
-
-    def _prune(self, *, protected_id: str | None = None) -> None:
-        now = self._clock()
-        expired = [
-            identifier
-            for identifier, last_access in self._last_access.items()
-            if now - last_access >= self._session_ttl_seconds
-        ]
-        for identifier in expired:
-            self._remove(identifier)
-
-        overflow = len(self._sessions) - self._max_sessions
-        if overflow <= 0:
-            return
-        candidates = [
-            identifier
-            for identifier in self._sessions
-            if identifier != protected_id
-        ]
-        candidates.sort(key=lambda identifier: self._last_access.get(identifier, 0.0))
-        for identifier in candidates[:overflow]:
-            self._remove(identifier)
-
-    def _touch(self, identifier: str) -> None:
-        self._last_access[identifier] = self._clock()
+        self._init_lifecycle(
+            max_sessions=max_sessions,
+            session_ttl_seconds=session_ttl_seconds,
+            clock=clock,
+        )
 
     def create(
         self,
@@ -130,15 +90,15 @@ class SessionStore3D:
         """Create or replace a deterministic 3D session."""
 
         parsed_rule = parse_rule_3d(rule) if isinstance(rule, str) else rule
-        actual_seed = 0 if seed is None else seed
+        actual_seed = resolve_seed(seed)
         grid = random_grid_3d(key_from_seed(actual_seed), depth, height, width, density)
         identifier = session_id or uuid4().hex
         self._sessions[identifier] = SimulationSession3D(
             grid=grid,
             initial_grid=grid,
             rule=parsed_rule,
-            seed=seed,
-            density=float(density),
+            seed=actual_seed,
+            initial_density=float(density),
         )
         self._touch(identifier)
         self._prune(protected_id=identifier)
@@ -182,7 +142,6 @@ class SessionStore3D:
         session = self.get(session_id)
         session.grid = session.initial_grid
         session.generation = 0
-        session.running = False
         self._clear_metrics(session)
         return session
 
@@ -190,7 +149,6 @@ class SessionStore3D:
         session = self.get(session_id)
         session.grid = jnp.zeros_like(session.grid)
         session.generation = 0
-        session.running = False
         self._clear_metrics(session)
         return session
 
@@ -202,7 +160,7 @@ class SessionStore3D:
         density: float = 0.04,
     ) -> SimulationSession3D:
         session = self.get(session_id)
-        actual_seed = 0 if seed is None else seed
+        actual_seed = resolve_seed(seed)
         grid = random_grid_3d(
             key_from_seed(actual_seed),
             session.depth,
@@ -212,10 +170,9 @@ class SessionStore3D:
         )
         session.grid = grid
         session.initial_grid = grid
-        session.seed = seed
-        session.density = float(density)
+        session.seed = actual_seed
+        session.initial_density = float(density)
         session.generation = 0
-        session.running = False
         self._clear_metrics(session)
         return session
 
@@ -228,8 +185,8 @@ class SessionStore3D:
         self, session_id: str = "3d-default", *, seed: int | None = None
     ) -> SimulationSession3D:
         session = self.get(session_id)
-        actual_seed = session.seed if seed is None and session.seed is not None else seed
-        session.rule = random_rule_3d(key_from_seed(0 if actual_seed is None else actual_seed))
+        actual_seed = session.seed if seed is None else resolve_seed(seed)
+        session.rule = random_rule_3d(key_from_seed(actual_seed))
         return session
 
     def step(
@@ -287,11 +244,6 @@ class SessionStore3D:
         session.last_step_ms = (perf_counter() - start_time) * 1000
         return metrics
 
-    def set_speed(self, speed: float, session_id: str = "3d-default") -> SimulationSession3D:
-        session = self.get(session_id)
-        session.speed = float(speed)
-        return session
-
     def run_until_stable(
         self,
         session_id: str = "3d-default",
@@ -308,7 +260,6 @@ class SessionStore3D:
         )
         session.grid = final_grid
         session.generation += int(steps_taken)
-        session.running = False
         host_metrics = np.asarray(jax.device_get(last_metrics))
         session.changed_cells = int(host_metrics[1])
         session.births = int(host_metrics[2])
@@ -335,26 +286,12 @@ class SessionStore3D:
             "death_fraction": deaths / total_cells,
         }
 
-    def payload(
-        self, session_id: str = "3d-default", *, max_voxels: int = 75_000
-    ) -> dict[str, Any]:
-        """Return metadata and living coordinates for efficient browser rendering."""
+    def payload(self, session_id: str = "3d-default") -> dict[str, Any]:
+        """Return metadata without serializing the potentially large voxel set."""
 
-        if max_voxels < 1:
-            raise ValueError("max_voxels must be positive")
         session = self.get(session_id)
-        extract_start = perf_counter()
-        values = np.asarray(jax.device_get(session.grid), dtype=np.uint8)
-        flat_indices = np.flatnonzero(values)
-        render_indices = flat_indices
-        sampled = len(flat_indices) > max_voxels
-        if sampled:
-            render_indices = np.linspace(0, len(flat_indices) - 1, max_voxels, dtype=np.int64)
-            render_indices = flat_indices[render_indices]
-        coordinates = np.column_stack(np.unravel_index(render_indices, values.shape)).tolist()
-        render_extract_ms = (perf_counter() - extract_start) * 1000
-        alive = int(values.sum())
-        serialization_start = perf_counter()
+        alive = int(alive_count_3d(session.grid))
+        alive_fraction = float(alive_fraction_3d(session.grid))
         response = {
             "session_id": session_id,
             "dimensions": 3,
@@ -364,33 +301,72 @@ class SessionStore3D:
             "width": session.width,
             "grid_shape": [session.depth, session.height, session.width],
             "seed": session.seed,
-            "density": session.density,
+            "initial_density": session.initial_density,
             "generation": session.generation,
             "alive": alive,
             "total_cells": session.total_cells,
-            "alive_fraction": alive / session.total_cells,
+            "alive_fraction": alive_fraction,
             "changed_cells": session.changed_cells,
             "changed_fraction": session.changed_cells / session.total_cells,
             "births": session.births,
             "birth_fraction": session.births / session.total_cells,
             "deaths": session.deaths,
             "death_fraction": session.deaths / session.total_cells,
-            "speed": session.speed,
-            "running": session.running,
             "jax_device": str(jax.devices()[0]),
             "last_step_ms": session.last_step_ms,
             "simulation_ms": session.last_step_ms,
-            "render_extract_ms": render_extract_ms,
-            "serialization_ms": 0.0,
-            "voxels": coordinates,
-            "rendered_voxels": len(coordinates),
-            "render_sampled": sampled,
-            "render_limit": max_voxels,
         }
+        return response
+
+    def render_bytes(
+        self, session_id: str = "3d-default", *, max_voxels: int = 75_000
+    ) -> tuple[bytes, dict[str, int | bool | float]]:
+        """Return sampled living voxel coordinates as packed uint8 triples."""
+
+        if max_voxels < 1:
+            raise ValueError("max_voxels must be positive")
+        session = self.get(session_id)
+        extract_start = perf_counter()
+        values = np.asarray(jax.device_get(session.grid), dtype=np.uint8)
+        flat_indices = np.flatnonzero(values)
+        sampled = len(flat_indices) > max_voxels
+        if sampled:
+            render_indices = np.linspace(0, len(flat_indices) - 1, max_voxels, dtype=np.int64)
+            render_indices = flat_indices[render_indices]
+        else:
+            render_indices = flat_indices
+        coordinates = np.column_stack(np.unravel_index(render_indices, values.shape)).astype(
+            np.uint8, copy=False
+        )
+        render_extract_ms = (perf_counter() - extract_start) * 1000
+        serialization_start = perf_counter()
+        content = coordinates.tobytes()
         serialization_ms = (perf_counter() - serialization_start) * 1000
         session.last_render_extract_ms = render_extract_ms
         session.last_serialization_ms = serialization_ms
-        response["serialization_ms"] = serialization_ms
+        metadata: dict[str, int | bool | float] = {
+            "depth": session.depth,
+            "height": session.height,
+            "width": session.width,
+            "generation": session.generation,
+            "rendered_voxels": len(coordinates),
+            "render_sampled": sampled,
+            "render_limit": max_voxels,
+            "render_extract_ms": render_extract_ms,
+            "serialization_ms": serialization_ms,
+        }
+        return content, metadata
+
+    def render_view_payload(
+        self, session_id: str = "3d-default", *, max_voxels: int = 75_000
+    ) -> dict[str, Any]:
+        """Return the capped coordinate view for explicit JSON export only."""
+
+        content, metadata = self.render_bytes(session_id, max_voxels=max_voxels)
+        coordinates = np.frombuffer(content, dtype=np.uint8).reshape(-1, 3).tolist()
+        response = self.payload(session_id)
+        response.update(metadata)
+        response["voxels"] = coordinates
         return response
 
     def export_npz(self, session_id: str = "3d-default") -> tuple[bytes, int]:
@@ -403,7 +379,7 @@ class SessionStore3D:
             session.grid,
             session.rule,
             seed=session.seed,
-            density=session.density,
+            density=session.initial_density,
             generation=session.generation,
         )
         return content, session.generation

@@ -22,13 +22,9 @@ const ruleText = byId("rule-text");
 const ruleDisplay = byId("rule-display");
 const generationValue = byId("generation-value");
 const metadataRule = byId("metadata-rule");
-const metadataGrid = byId("metadata-grid");
 const metadataGeneration = byId("metadata-generation");
 const metadataAlive = byId("metadata-alive");
-const metadataChanged = byId("metadata-changed");
-const metadataBirths = byId("metadata-births");
-const metadataDeaths = byId("metadata-deaths");
-const metadataDensity = byId("metadata-density");
+const metadataActivity = byId("metadata-activity");
 const metricsChart = byId("metrics-chart");
 
 let currentState = null;
@@ -68,11 +64,10 @@ function numberValue(input, fallback) {
 }
 
 function setInputsFromState(state) {
-  densityInput.value = String(state.density ?? 0.2);
-  densityValue.textContent = Number(state.density ?? 0.2).toFixed(2);
-  seedInput.value = state.seed ?? 42;
-  speedInput.value = String(state.speed ?? 10);
-  speedValue.textContent = `${Number(state.speed ?? 10).toFixed(0)} gen/s`;
+  const initialDensity = state.initial_density ?? state.density ?? 0.2;
+  densityInput.value = String(initialDensity);
+  densityValue.textContent = Number(initialDensity).toFixed(2);
+  seedInput.value = state.seed ?? "";
 }
 
 const gridCanvas = new GridCanvas(canvas, {
@@ -143,13 +138,9 @@ function renderState(state) {
   ruleDisplay.textContent = state.rule;
   generationValue.textContent = String(state.generation);
   metadataRule.textContent = state.rule;
-  metadataGrid.textContent = `${state.width} x ${state.height}`;
   metadataGeneration.textContent = String(state.generation);
   metadataAlive.textContent = Number(state.alive).toLocaleString();
-  metadataChanged.textContent = Number(state.changed_cells || 0).toLocaleString();
-  metadataBirths.textContent = Number(state.births || 0).toLocaleString();
-  metadataDeaths.textContent = Number(state.deaths || 0).toLocaleString();
-  metadataDensity.textContent = Number(state.alive_fraction).toFixed(4);
+  metadataActivity.textContent = `${(Number(state.changed_fraction || 0) * 100).toFixed(2)}%`;
   updateMetricHistory(state);
   setInputsFromState(state);
 }
@@ -281,8 +272,8 @@ async function importJson(file) {
     session_id: sessionId,
     width,
     height,
-    density: imported.density ?? 0.2,
-    seed: imported.seed ?? 42,
+    density: imported.initial_density ?? imported.density ?? 0.2,
+    seed: imported.seed,
     rule: imported.rule || "B3/S23",
   });
   const loaded = await api.updateState(sessionId, imported.grid, imported.generation || 0);
@@ -340,7 +331,6 @@ byId("density-input").addEventListener("input", (event) => {
 });
 byId("speed-input").addEventListener("input", (event) => {
   speedValue.textContent = `${Number(event.target.value).toFixed(0)} gen/s`;
-  if (currentState) api.setSpeed(sessionId, Number(event.target.value)).catch(() => {});
 });
 byId("apply-dimensions-button").addEventListener("click", () => {
   pause();
@@ -394,7 +384,7 @@ async function boot() {
     heightInput.value = state.height;
     // Start with a recognizable glider while keeping the regular randomize
     // controls fully deterministic for research runs.
-    const glider = state.grid.map((row) => row.slice());
+    const glider = Array.from({ length: state.height }, () => Array(state.width).fill(0));
     [[1, 2], [2, 3], [3, 1], [3, 2], [3, 3]].forEach(([row, column]) => { glider[row + 1][column + 1] = 1; });
     const initial = await api.updateState(sessionId, glider, 0);
     renderState(initial);

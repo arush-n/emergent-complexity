@@ -10,6 +10,8 @@ class SessionRequest(BaseModel):
     width: int = Field(default=128, ge=8, le=1024)
     height: int = Field(default=128, ge=8, le=1024)
     density: float = Field(default=0.20, ge=0.0, le=1.0)
+    # ``null`` requests a freshly generated seed; the response always returns
+    # the concrete integer used to initialize the grid.
     seed: int | None = 42
     rule: str = "B3/S23"
 
@@ -56,10 +58,6 @@ class StateRequest(ActionRequest):
     seed: int | None = None
     density: float | None = Field(default=None, ge=0.0, le=1.0)
     generation: int = Field(default=0, ge=0)
-
-
-class SpeedRequest(ActionRequest):
-    speed: float = Field(default=10.0, ge=1.0, le=600.0)
 
 
 class Experiment3DRequest(BaseModel):

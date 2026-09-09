@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0b0b0a" />
     <title>Emergent Complexity - Life Lab</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
+    <script src="./config.js"></script>
     <script type="importmap">
       {
         "imports": {
@@ -18,8 +20,8 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div class="topbar-left">
-          <div class="brand">EMERGENT COMPLEXITY</div>
+          <div class="topbar-left">
+          <div class="brand"><span class="glider-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>EMERGENT COMPLEXITY</span></div>
           <button id="controls-toggle" class="button button-quiet button-small controls-toggle" type="button" aria-expanded="true">Controls</button>
         </div>
         <nav class="mode-nav" aria-label="Laboratory modes">
@@ -36,10 +38,7 @@
           <div class="lab-layout">
             <section class="simulation-panel panel">
               <div class="panel-heading">
-                <div>
-                  <p class="section-kicker">2D LIFE</p>
-                  <h2 id="mode-2d-heading">2D cellular automaton</h2>
-                </div>
+                <h2 id="mode-2d-heading">2D</h2>
                 <div class="generation-pill">GEN <strong id="generation-value">0</strong></div>
               </div>
 
@@ -108,7 +107,7 @@
                 <div class="card-heading">
                   <div>
                     <p class="section-kicker">INITIAL CONDITION</p>
-                    <h2>Shape the starting world</h2>
+                    <h2>Initial state</h2>
                   </div>
                 </div>
                 <div class="field-grid two-up">
@@ -117,7 +116,7 @@
                 </div>
                 <button id="apply-dimensions-button" class="button button-secondary full-width" type="button">Apply dimensions</button>
                 <div class="range-line">
-                  <label for="density-input">Density <output id="density-value">0.20</output></label>
+                  <label for="density-input">Initial density <output id="density-value">0.20</output></label>
                   <input id="density-input" type="range" min="0" max="1" step="0.01" value="0.20" />
                 </div>
                 <label for="seed-input">Seed<input id="seed-input" type="number" value="42" step="1" /></label>
@@ -156,13 +155,9 @@
 
           <section class="metadata-strip panel" aria-label="Current 2D simulation metadata">
             <div><span>Rule</span><strong id="metadata-rule">B3/S23</strong></div>
-            <div><span>Grid</span><strong id="metadata-grid">128 x 128</strong></div>
             <div><span>Generation</span><strong id="metadata-generation">0</strong></div>
             <div><span>Alive cells</span><strong id="metadata-alive">0</strong></div>
-            <div><span>Changed last gen</span><strong id="metadata-changed">0</strong></div>
-            <div><span>Births last gen</span><strong id="metadata-births">0</strong></div>
-            <div><span>Deaths last gen</span><strong id="metadata-deaths">0</strong></div>
-            <div><span>Density</span><strong id="metadata-density">0.0000</strong></div>
+            <div><span>Activity</span><strong id="metadata-activity">0.00%</strong></div>
           </section>
         </section>
 
@@ -170,26 +165,28 @@
           <div class="lab-layout lab-layout-3d">
             <section class="simulation-panel panel">
               <div class="panel-heading">
-                <div>
-                  <p class="section-kicker">3D LIFE</p>
-                  <h2 id="mode-3d-heading">3D voxel automaton</h2>
-                </div>
+                <h2 id="mode-3d-heading">3D</h2>
                 <div class="generation-pill">GEN <strong id="3d-generation-value">0</strong></div>
               </div>
               <div id="viewport-3d" class="viewport-frame" data-testid="viewport-3d" aria-label="Three-dimensional voxel viewport">
                 <div id="three-loading" class="viewport-message">Loading WebGL voxel renderer...</div>
                 <div class="canvas-hint">Orbit: left drag - pan: right drag - zoom: scroll</div>
                 <div class="viewport-toolbar" aria-label="3D view tools">
-                  <button id="3d-reset-camera" class="button button-quiet button-small" type="button">Reset camera</button>
                   <button class="chip-button" data-camera="perspective" type="button">Perspective</button>
                   <button class="chip-button" data-camera="front" type="button">Front</button>
                   <button class="chip-button" data-camera="side" type="button">Side</button>
                   <button class="chip-button" data-camera="top" type="button">Top</button>
-                  <label class="check-control" for="3d-bounds-input"><input id="3d-bounds-input" type="checkbox" checked /> <span>Bounds</span></label>
-                  <label class="check-control" for="3d-performance-input"><input id="3d-performance-input" type="checkbox" /> <span>Performance</span></label>
-                  <button id="3d-capture-button" class="button button-quiet button-small" type="button">Capture</button>
-                  <button id="3d-export-button" class="button button-quiet button-small" type="button">Export exact NPZ</button>
-                  <button id="3d-share-button" class="button button-quiet button-small" type="button">Copy link</button>
+                  <details id="3d-view-menu" class="viewport-menu">
+                    <summary>View</summary>
+                    <div class="viewport-menu-content">
+                      <button id="3d-reset-camera" class="button button-quiet button-small" type="button">Reset camera</button>
+                      <label class="check-control" for="3d-bounds-input"><input id="3d-bounds-input" type="checkbox" checked /> <span>Bounds</span></label>
+                      <label class="check-control" for="3d-performance-input"><input id="3d-performance-input" type="checkbox" /> <span>Performance</span></label>
+                      <button id="3d-capture-button" class="button button-quiet button-small" type="button">Capture</button>
+                      <button id="3d-export-button" class="button button-quiet button-small" type="button">Export exact NPZ</button>
+                      <button id="3d-share-button" class="button button-quiet button-small" type="button">Copy link</button>
+                    </div>
+                  </details>
                 </div>
               </div>
               <div id="3d-render-warning" class="render-warning hidden">High render density - displaying a deterministic voxel sample; simulation remains exact.</div>
@@ -283,13 +280,9 @@
           </details>
           <section class="metadata-strip panel" aria-label="Current 3D simulation metadata">
             <div><span>Rule</span><strong id="3d-metadata-rule">B6/S5,6,7</strong></div>
-            <div><span>Grid</span><strong id="3d-metadata-grid">32 x 32 x 32</strong></div>
             <div><span>Generation</span><strong id="3d-metadata-generation">0</strong></div>
             <div><span>Alive cells</span><strong id="3d-metadata-alive">0</strong></div>
-            <div><span>Changed last gen</span><strong id="3d-metadata-changed">0</strong></div>
-            <div><span>Births last gen</span><strong id="3d-metadata-births">0</strong></div>
-            <div><span>Deaths last gen</span><strong id="3d-metadata-deaths">0</strong></div>
-            <div><span>Density</span><strong id="3d-metadata-density">0.0000</strong></div>
+            <div><span>Activity</span><strong id="3d-metadata-activity">0.00%</strong></div>
           </section>
         </section>
 

@@ -70,6 +70,7 @@ def run_smoke(url: str, *, headed: bool = False) -> None:
         )
         page.locator('[id="3d-step-button"]').click()
         wait_for_generation(page, "3d-generation-value", 1)
+        page.locator('[id="3d-view-menu"] summary').click()
         page.locator('[id="3d-performance-input"]').check()
         page.locator('[id="3d-axis-input"]').select_option("y")
         page.locator('[id="3d-slice-input"]').check()
