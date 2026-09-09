@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: emergent-complexity
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health

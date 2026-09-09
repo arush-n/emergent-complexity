@@ -1,0 +1,77 @@
+"""Pure JAX primitives for three-dimensional binary cellular automata."""
+
+from .grid import Grid3D, empty_grid_3d
+from .measurements import alive_count_3d, alive_fraction_3d, transition_counts_3d
+from .random import generate_random_grids_3d, random_grid_3d, random_rule_3d, random_rules_3d
+from .rules import (
+    DEFAULT_3D_RULE,
+    Rule3D,
+    format_rule_3d,
+    int_to_rule_3d,
+    masks_to_rule_3d,
+    parse_rule_3d,
+    rule_to_int_3d,
+    rule_to_masks_3d,
+    validate_rule_3d,
+)
+from .simulate import (
+    generate_batched_trajectory_3d,
+    generate_trajectory_3d,
+    run_batched_until_stable_3d,
+    run_steps_3d,
+    run_steps_batch_3d,
+    run_steps_batch_with_metrics_3d,
+    run_steps_dynamic_with_metrics_3d,
+    run_steps_with_metrics_3d,
+    run_until_stable_3d,
+    run_until_stable_with_metrics_3d,
+    simulate_rule_3d,
+    simulate_rule_batch_3d,
+    simulate_rules_3d,
+)
+from .step import (
+    batched_step_3d,
+    count_neighbors_3d,
+    count_neighbors_3d_jit,
+    step_3d,
+    step_3d_jit,
+)
+
+__all__ = [
+    "DEFAULT_3D_RULE",
+    "Grid3D",
+    "Rule3D",
+    "alive_count_3d",
+    "alive_fraction_3d",
+    "batched_step_3d",
+    "count_neighbors_3d",
+    "count_neighbors_3d_jit",
+    "empty_grid_3d",
+    "format_rule_3d",
+    "generate_batched_trajectory_3d",
+    "generate_random_grids_3d",
+    "generate_trajectory_3d",
+    "int_to_rule_3d",
+    "masks_to_rule_3d",
+    "parse_rule_3d",
+    "random_grid_3d",
+    "random_rule_3d",
+    "random_rules_3d",
+    "rule_to_int_3d",
+    "rule_to_masks_3d",
+    "run_batched_until_stable_3d",
+    "run_steps_3d",
+    "run_steps_batch_3d",
+    "run_steps_batch_with_metrics_3d",
+    "run_steps_dynamic_with_metrics_3d",
+    "run_steps_with_metrics_3d",
+    "run_until_stable_3d",
+    "run_until_stable_with_metrics_3d",
+    "simulate_rule_3d",
+    "simulate_rule_batch_3d",
+    "simulate_rules_3d",
+    "step_3d",
+    "step_3d_jit",
+    "transition_counts_3d",
+    "validate_rule_3d",
+]

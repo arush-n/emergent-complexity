@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080a0b" />
+    <title>Emergent Complexity - Life Lab</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">JAX RESEARCH TOOLKIT</p>
+          <h1>Emergent Complexity <span>Life Lab</span></h1>
+        </div>
+        <div id="device-chip" class="device-chip"><span class="status-dot"></span>JAX device loading</div>
+      </header>
+
+      <nav class="mode-nav" aria-label="Laboratory modes">
+        <button class="mode-link active" data-mode="2d" type="button">2D Life</button>
+        <button class="mode-link" data-mode="3d" type="button">3D Life</button>
+        <button class="mode-link" data-mode="compare" type="button">Compare</button>
+        <button class="mode-link" data-mode="experiments" type="button">Experiments</button>
+      </nav>
+
+      <main>
+        <section id="mode-2d" class="mode-panel" aria-labelledby="mode-2d-heading">
+          <div class="lab-layout">
+            <section class="simulation-panel panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">2D LIFE</p>
+                  <h2 id="mode-2d-heading">Draw a world, then let it evolve.</h2>
+                </div>
+                <div class="generation-pill">GEN <strong id="generation-value">0</strong></div>
+              </div>
+
+              <div class="canvas-frame">
+                <canvas id="ca-canvas" data-testid="ca-canvas" aria-label="Cellular automaton grid"></canvas>
+                <div class="canvas-hint">Click or drag to draw - right-click to erase</div>
+              </div>
+
+              <div class="canvas-tools">
+                <label class="inline-control" for="edit-mode">
+                  <span>Brush</span>
+                  <select id="edit-mode" data-testid="edit-mode">
+                    <option value="toggle">Toggle</option>
+                    <option value="paint">Paint alive</option>
+                    <option value="erase">Erase</option>
+                  </select>
+                </label>
+                <label class="check-control" for="grid-lines">
+                  <input id="grid-lines" type="checkbox" checked />
+                  <span>Grid lines</span>
+                </label>
+                <button id="capture-button" class="button button-quiet button-small" type="button">Capture</button>
+                <span id="status-message" class="status-message" role="status" aria-live="polite">Ready</span>
+              </div>
+
+              <div class="transport" aria-label="2D simulation controls">
+                <button id="play-button" data-testid="play-button" class="button button-primary" type="button">Play</button>
+                <button id="pause-button" data-testid="pause-button" class="button button-secondary" type="button">Pause</button>
+                <button id="step-button" data-testid="step-button" class="button button-secondary" type="button">Step</button>
+                <button id="reset-button" data-testid="reset-button" class="button button-quiet" type="button">Reset</button>
+                <button id="clear-button" data-testid="clear-button" class="button button-quiet" type="button">Clear</button>
+              </div>
+            </section>
+
+            <aside class="control-column">
+              <section class="panel control-card">
+                <div class="card-heading">
+                  <div>
+                    <p class="section-kicker">RULE SPACE</p>
+                    <h2>Transition rule</h2>
+                  </div>
+                  <span id="rule-display" class="rule-display">B3/S23</span>
+                </div>
+                <div class="rule-group">
+                  <div class="rule-label"><span>Birth</span><small>dead cells</small></div>
+                  <div id="birth-toggles" class="count-toggles" aria-label="Birth neighbor counts"></div>
+                </div>
+                <div class="rule-group">
+                  <div class="rule-label"><span>Survival</span><small>live cells</small></div>
+                  <div id="survival-toggles" class="count-toggles" aria-label="Survival neighbor counts"></div>
+                </div>
+                <div class="preset-row" aria-label="Rule presets">
+                  <button class="chip-button" data-rule-preset="B3/S23" type="button">Conway</button>
+                  <button class="chip-button" data-rule-preset="B36/S23" type="button">HighLife</button>
+                  <button id="random-rule-button" class="chip-button accent" type="button">Random rule</button>
+                </div>
+                <div class="direct-rule">
+                  <label for="rule-text">Direct entry</label>
+                  <div class="input-row">
+                    <input id="rule-text" type="text" value="B3/S23" spellcheck="false" aria-label="Rule string" />
+                    <button id="apply-rule-button" class="button button-small" type="button">Apply</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel control-card">
+                <div class="card-heading">
+                  <div>
+                    <p class="section-kicker">INITIAL CONDITION</p>
+                    <h2>Shape the starting world</h2>
+                  </div>
+                </div>
+                <div class="field-grid two-up">
+                  <label for="width-input">Width<input id="width-input" type="number" min="8" max="1024" value="128" /></label>
+                  <label for="height-input">Height<input id="height-input" type="number" min="8" max="1024" value="128" /></label>
+                </div>
+                <button id="apply-dimensions-button" class="button button-secondary full-width" type="button">Apply dimensions</button>
+                <div class="range-line">
+                  <label for="density-input">Density <output id="density-value">0.20</output></label>
+                  <input id="density-input" type="range" min="0" max="1" step="0.01" value="0.20" />
+                </div>
+                <label for="seed-input">Seed<input id="seed-input" type="number" value="42" step="1" /></label>
+                <button id="randomize-button" data-testid="randomize-button" class="button button-primary full-width" type="button">Randomize initial state</button>
+              </section>
+
+              <section class="panel control-card compact-card">
+                <div class="range-line">
+                  <label for="speed-input">Playback speed <output id="speed-value">10 gen/s</output></label>
+                  <input id="speed-input" type="range" min="1" max="600" step="1" value="10" />
+                </div>
+                <label for="stability-limit">Fixed-point limit<input id="stability-limit" type="number" min="0" max="100000" step="1" value="10000" /></label>
+                <button id="stabilize-button" data-testid="stabilize-button" class="button button-secondary full-width" type="button">Run until fixed point</button>
+                <div class="file-actions">
+                  <button id="save-button" class="button button-secondary" type="button">Save JSON</button>
+                  <button id="load-button" class="button button-secondary" type="button">Load JSON</button>
+                  <input id="load-input" type="file" accept="application/json,.json" hidden />
+                </div>
+              </section>
+            </aside>
+          </div>
+
+          <section class="panel insights-panel" aria-labelledby="metrics-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">EVOLUTION TRACE</p>
+                <h2 id="metrics-heading">Population and activity</h2>
+              </div>
+              <div class="chart-legend" aria-label="Chart legend">
+                <span class="legend-population">Population</span>
+                <span class="legend-activity">Activity</span>
+                <span class="legend-births">Births</span>
+                <span class="legend-deaths">Deaths</span>
+              </div>
+            </div>
+            <svg id="metrics-chart" data-testid="metrics-chart" viewBox="0 0 640 310" role="img" aria-label="Population, activity, births, and deaths over generations"></svg>
+            <p class="chart-note">State shows live-cell fraction. Activity counts changed cells; transitions separate births from deaths for each generation.</p>
+          </section>
+
+          <section class="metadata-strip panel" aria-label="Current 2D simulation metadata">
+            <div><span>Rule</span><strong id="metadata-rule">B3/S23</strong></div>
+            <div><span>Grid</span><strong id="metadata-grid">128 x 128</strong></div>
+            <div><span>Generation</span><strong id="metadata-generation">0</strong></div>
+            <div><span>Alive cells</span><strong id="metadata-alive">0</strong></div>
+            <div><span>Changed last gen</span><strong id="metadata-changed">0</strong></div>
+            <div><span>Births last gen</span><strong id="metadata-births">0</strong></div>
+            <div><span>Deaths last gen</span><strong id="metadata-deaths">0</strong></div>
+            <div><span>Density</span><strong id="metadata-density">0.0000</strong></div>
+          </section>
+        </section>
+
+        <section id="mode-3d" class="mode-panel hidden" aria-labelledby="mode-3d-heading">
+          <div class="lab-layout lab-layout-3d">
+            <section class="simulation-panel panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">3D LIFE</p>
+                  <h2 id="mode-3d-heading">Orbit the complete voxel state.</h2>
+                </div>
+                <div class="generation-pill">GEN <strong id="3d-generation-value">0</strong></div>
+              </div>
+              <div id="viewport-3d" class="viewport-frame" data-testid="viewport-3d" aria-label="Three-dimensional voxel viewport">
+                <div id="three-loading" class="viewport-message">Loading WebGL voxel renderer...</div>
+                <div class="canvas-hint">Orbit: left drag - pan: right drag - zoom: scroll</div>
+              </div>
+              <div class="viewport-toolbar">
+                <button id="3d-reset-camera" class="button button-quiet button-small" type="button">Reset camera</button>
+                <button class="chip-button" data-camera="perspective" type="button">Perspective</button>
+                <button class="chip-button" data-camera="front" type="button">Front</button>
+                <button class="chip-button" data-camera="side" type="button">Side</button>
+                <button class="chip-button" data-camera="top" type="button">Top</button>
+                <label class="check-control" for="3d-bounds-input"><input id="3d-bounds-input" type="checkbox" checked /> <span>Bounds</span></label>
+                <label class="check-control" for="3d-performance-input"><input id="3d-performance-input" type="checkbox" /> <span>Performance</span></label>
+                <button id="3d-capture-button" class="button button-quiet button-small" type="button">Capture</button>
+                <button id="3d-export-button" class="button button-quiet button-small" type="button">Export state</button>
+                <button id="3d-share-button" class="button button-quiet button-small" type="button">Copy link</button>
+              </div>
+              <div id="3d-render-warning" class="render-warning hidden">High render density - displaying a deterministic voxel sample; simulation remains exact.</div>
+              <div id="3d-performance-overlay" class="performance-overlay hidden" aria-live="polite"></div>
+              <div id="3d-slice-panel" class="slice-panel hidden">
+                <div class="panel-heading">
+                  <div><p class="section-kicker">CROSS-SECTION</p><h3>Exact slice</h3></div>
+                  <span id="3d-slice-label" class="rule-display">Z 0</span>
+                </div>
+                <canvas id="3d-slice-canvas" aria-label="Exact 3D cross-section"></canvas>
+              </div>
+              <div class="canvas-tools">
+                <span id="3d-status-message" class="status-message" role="status" aria-live="polite">Ready</span>
+              </div>
+              <div class="transport" aria-label="3D simulation controls">
+                <button id="3d-play-button" class="button button-primary" type="button">Play</button>
+                <button id="3d-pause-button" class="button button-secondary" type="button">Pause</button>
+                <button id="3d-step-button" class="button button-secondary" type="button">Step</button>
+                <button id="3d-reset-button" class="button button-quiet" type="button">Reset</button>
+                <button id="3d-clear-button" class="button button-quiet" type="button">Clear</button>
+              </div>
+            </section>
+
+            <aside class="control-column">
+              <section class="panel control-card">
+                <div class="card-heading"><div><p class="section-kicker">SIMULATION</p><h2>Playback</h2></div></div>
+                <div class="range-line">
+                  <label for="3d-speed-input">Speed <output id="3d-speed-value">10 gen/s</output></label>
+                  <input id="3d-speed-input" type="range" min="1" max="600" step="1" value="10" />
+                </div>
+                <label for="3d-stability-limit">Fixed-point limit<input id="3d-stability-limit" type="number" min="0" max="100000" value="1000" /></label>
+                <button id="3d-stabilize-button" class="button button-secondary full-width" type="button">Run until fixed point</button>
+              </section>
+
+              <section class="panel control-card">
+                <div class="card-heading"><div><p class="section-kicker">INITIAL STATE</p><h2>Voxel world</h2></div></div>
+                <div class="field-grid three-up">
+                  <label for="3d-depth-input">Depth<input id="3d-depth-input" type="number" min="8" max="128" value="32" /></label>
+                  <label for="3d-height-input">Height<input id="3d-height-input" type="number" min="8" max="128" value="32" /></label>
+                  <label for="3d-width-input">Width<input id="3d-width-input" type="number" min="8" max="128" value="32" /></label>
+                </div>
+                <button id="3d-apply-dimensions" class="button button-secondary full-width" type="button">Apply dimensions</button>
+                <div class="range-line">
+                  <label for="3d-density-input">Density <output id="3d-density-value">0.04</output></label>
+                  <input id="3d-density-input" type="range" min="0" max="1" step="0.01" value="0.04" />
+                </div>
+                <label for="3d-seed-input">Seed<input id="3d-seed-input" type="number" value="42" step="1" /></label>
+                <button id="3d-randomize-button" class="button button-primary full-width" type="button">Randomize</button>
+              </section>
+
+              <section class="panel control-card">
+                <div class="card-heading">
+                  <div><p class="section-kicker">RULE</p><h2>26-neighbor transitions</h2></div>
+                  <span id="3d-rule-display" class="rule-display">B6/S5,6,7</span>
+                </div>
+                <p class="help-text" title="B counts create a new living voxel. S counts keep a living voxel alive. Each voxel has 26 neighbors.">B = birth counts, S = survival counts. Each voxel has 26 neighbors.</p>
+                <div class="rule-group">
+                  <div class="rule-label"><span>Birth</span><small>0 - 26</small></div>
+                  <div id="3d-birth-toggles" class="count-toggles count-toggles-3d" aria-label="3D birth neighbor counts"></div>
+                </div>
+                <div class="rule-group">
+                  <div class="rule-label"><span>Survival</span><small>0 - 26</small></div>
+                  <div id="3d-survival-toggles" class="count-toggles count-toggles-3d" aria-label="3D survival neighbor counts"></div>
+                </div>
+                <div class="preset-row">
+                  <button class="chip-button" data-3d-rule-preset="B6/S5,6,7" type="button">Example</button>
+                  <button class="chip-button accent" id="3d-random-rule-button" type="button">Random rule</button>
+                </div>
+                <div class="direct-rule">
+                  <label for="3d-rule-text">Direct entry</label>
+                  <div class="input-row"><input id="3d-rule-text" type="text" value="B6/S5,6,7" spellcheck="false" /><button id="3d-apply-rule-button" class="button button-small" type="button">Apply</button></div>
+                </div>
+              </section>
+
+              <section class="panel control-card">
+                <div class="card-heading"><div><p class="section-kicker">VIEW</p><h2>Inspect a plane</h2></div></div>
+                <label class="check-control" for="3d-slice-input"><input id="3d-slice-input" type="checkbox" /> <span>Slice view</span></label>
+                <div class="field-grid two-up compact-fields">
+                  <label for="3d-axis-input">Axis<select id="3d-axis-input"><option value="z">Z</option><option value="y">Y</option><option value="x">X</option></select></label>
+                  <label for="3d-slice-index">Slice<input id="3d-slice-index" type="range" min="0" max="31" value="16" /></label>
+                </div>
+                <p class="chart-note">The slice canvas is an exact server-rendered plane. Voxel sampling, when needed, only affects the display.</p>
+              </section>
+            </aside>
+          </div>
+          <section class="panel insights-panel" aria-labelledby="3d-metrics-heading">
+            <div class="panel-heading"><div><p class="section-kicker">EVOLUTION TRACE</p><h2 id="3d-metrics-heading">3D population and activity</h2></div><div class="chart-legend"><span class="legend-population">Population</span><span class="legend-activity">Activity</span><span class="legend-births">Births</span><span class="legend-deaths">Deaths</span></div></div>
+            <svg id="metrics-chart-3d" viewBox="0 0 640 310" role="img" aria-label="3D population, activity, births, and deaths over generations"></svg>
+            <p class="chart-note">These are descriptive transition measurements from the exact JAX state.</p>
+          </section>
+          <section class="metadata-strip panel" aria-label="Current 3D simulation metadata">
+            <div><span>Rule</span><strong id="3d-metadata-rule">B6/S5,6,7</strong></div>
+            <div><span>Grid</span><strong id="3d-metadata-grid">32 x 32 x 32</strong></div>
+            <div><span>Generation</span><strong id="3d-metadata-generation">0</strong></div>
+            <div><span>Alive cells</span><strong id="3d-metadata-alive">0</strong></div>
+            <div><span>Changed last gen</span><strong id="3d-metadata-changed">0</strong></div>
+            <div><span>Births last gen</span><strong id="3d-metadata-births">0</strong></div>
+            <div><span>Deaths last gen</span><strong id="3d-metadata-deaths">0</strong></div>
+            <div><span>Density</span><strong id="3d-metadata-density">0.0000</strong></div>
+          </section>
+        </section>
+
+        <section id="mode-compare" class="mode-panel hidden" aria-labelledby="compare-heading">
+          <section class="panel page-heading">
+            <div><p class="section-kicker">SIDE-BY-SIDE</p><h2 id="compare-heading">Compare 2D and 3D states</h2><p class="chart-note">The two systems share seed and density, but use explicitly selected rules and grid sizes.</p></div>
+            <div class="compare-actions"><button id="compare-play" class="button button-primary" type="button">Play both</button><button id="compare-pause" class="button button-secondary" type="button">Pause</button><button id="compare-step" class="button button-secondary" type="button">Step both</button><button id="compare-randomize" class="button button-primary" type="button">Randomize both</button><button id="compare-reset" class="button button-quiet" type="button">Reset both</button></div>
+          </section>
+          <section class="panel compare-controls">
+            <div class="field-grid four-up">
+              <label for="compare-rule-2d">2D rule<input id="compare-rule-2d" type="text" value="B3/S23" /></label>
+              <label for="compare-rule-3d">3D rule<input id="compare-rule-3d" type="text" value="B6/S5,6,7" /></label>
+              <label for="compare-density">Density<input id="compare-density" type="number" min="0" max="1" step="0.01" value="0.10" /></label>
+              <label for="compare-seed">Seed<input id="compare-seed" type="number" value="42" /></label>
+            </div>
+            <div class="field-grid four-up">
+              <label for="compare-size-2d">2D size<input id="compare-size-2d" type="number" min="8" max="256" value="64" /></label>
+              <label for="compare-size-3d">3D size<input id="compare-size-3d" type="number" min="8" max="96" value="32" /></label>
+              <label for="compare-speed">Speed <output id="compare-speed-value">10 gen/s</output><input id="compare-speed" type="range" min="1" max="600" value="10" /></label>
+              <span id="compare-status" class="status-message">Ready</span>
+            </div>
+          </section>
+          <div class="compare-layout">
+            <section class="panel compare-pane"><div class="panel-heading"><h2>2D Life</h2><span id="compare-2d-meta" class="rule-display">B3/S23</span></div><div class="compare-canvas-frame"><canvas id="compare-2d-canvas" aria-label="2D comparison grid"></canvas></div><div id="compare-2d-stats" class="compare-stats">Generation 0 | Alive 0</div></section>
+            <section class="panel compare-pane"><div class="panel-heading"><h2>3D Life</h2><span id="compare-3d-meta" class="rule-display">B6/S5,6,7</span></div><div id="compare-3d-viewport" class="compare-viewport"></div><div id="compare-3d-stats" class="compare-stats">Generation 0 | Alive 0</div></section>
+          </div>
+        </section>
+
+        <section id="mode-experiments" class="mode-panel hidden" aria-labelledby="experiments-heading">
+          <section class="panel page-heading"><div><p class="section-kicker">RAW EXPERIMENTS</p><h2 id="experiments-heading">Sample rules in parallel</h2><p class="chart-note">Runs are reproducible JAX batches. Results are descriptive measurements only; no behavioral labels are assigned.</p></div><div class="experiment-actions"><button id="experiment-run" class="button button-primary" type="button">Run experiment</button><button id="experiment-export" class="button button-secondary" type="button" disabled>Export CSV</button></div></section>
+          <section class="panel experiment-controls">
+            <div class="field-grid six-up">
+              <label for="experiment-dimensions">Dimensions<select id="experiment-dimensions"><option value="3">3D</option><option value="2">2D</option></select></label>
+              <label for="experiment-rules">Rules<input id="experiment-rules" type="number" min="1" max="100" value="5" /></label>
+              <label for="experiment-conditions">Initial states<input id="experiment-conditions" type="number" min="1" max="100" value="4" /></label>
+              <label for="experiment-size">Size<input id="experiment-size" type="number" min="8" max="96" value="24" /></label>
+              <label for="experiment-steps">Steps<input id="experiment-steps" type="number" min="0" max="2000" value="50" /></label>
+              <label for="experiment-density">Density<input id="experiment-density" type="number" min="0" max="1" step="0.01" value="0.10" /></label>
+            </div>
+            <div class="field-grid two-up experiment-seed-row"><label for="experiment-seed">Seed<input id="experiment-seed" type="number" value="42" /></label><span id="experiment-progress" class="status-message">No experiment running.</span></div>
+          </section>
+          <section class="panel results-panel"><div class="panel-heading"><div><p class="section-kicker">RESULTS</p><h2>Raw run measurements</h2></div><span id="experiment-summary" class="rule-display">No results</span></div><label class="filter-line" for="experiment-filter">Filter rules<input id="experiment-filter" type="search" placeholder="B6 or S5,6" /></label><div class="table-wrap"><table id="experiment-table"><thead><tr><th data-sort="rule">Rule</th><th data-sort="runs">Runs</th><th data-sort="final">Mean final alive %</th><th data-sort="changed">Mean changed %</th><th data-sort="fixed">Fixed points</th><th></th></tr></thead><tbody><tr><td colspan="6" class="empty-table">Run a small experiment to populate this table.</td></tr></tbody></table></div></section>
+        </section>
+      </main>
+
+      <footer class="footer-note">JAX is the numerical source of truth - the browser is a visualization client - toroidal Moore boundaries</footer>
+    </div>
+    <noscript>This laboratory needs JavaScript enabled to render the interactive simulator.</noscript>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
