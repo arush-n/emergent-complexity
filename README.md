@@ -221,11 +221,13 @@ The top navigation switches between:
 - `Compare`: advance independent 2D and 3D sessions side by side with shared seed/density controls and separately chosen rules.
 - `Runs`: run small raw random-rule batches, filter/sort results, export CSV, and open a selected rule in the relevant simulator.
 
-The 3D browser view loads Three.js r185 from a pinned public CDN module. The
-renderer keeps geometry/material allocations alive between state updates,
-renders on demand while its mode is active, and makes sampling visible when
-the render cap is exceeded. The Python numerical engine and all experiment
-runners work without the website.
+The 3D browser view ships with the tested Three.js r185 module and
+`OrbitControls` under `frontend/vendor/three`, so it does not depend on a
+runtime CDN fetch. The included Three.js license is kept alongside those
+assets. The renderer keeps geometry/material allocations alive between state
+updates, renders on demand while its mode is active, and makes sampling
+visible when the render cap is exceeded. The Python numerical engine and all
+experiment runners work without the website.
 
 ## Python API
 

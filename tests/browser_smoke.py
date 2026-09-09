@@ -33,6 +33,8 @@ def run_smoke(url: str, *, headed: bool = False) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=not headed)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        requested_urls: list[str] = []
+        page.on("request", lambda request: requested_urls.append(request.url))
         page.goto(url, wait_until="domcontentloaded")
 
         page.locator('[data-testid="ca-canvas"]').wait_for(state="visible")
@@ -47,6 +49,8 @@ def run_smoke(url: str, *, headed: bool = False) -> None:
 
         page.locator('[data-mode="3d"]').click()
         page.locator('[id="viewport-3d"] canvas').wait_for(state="visible")
+        assert any(url.endswith("/vendor/three/three.module.js") for url in requested_urls)
+        assert not any("cdn.jsdelivr.net" in url for url in requested_urls)
         page.wait_for_function(
             "() => document.getElementById('3d-status-message').textContent.includes('Ready')"
         )
