@@ -95,7 +95,14 @@ class TraceReader:
                 elif event["event"] == "terminal":
                     self.terminal_reasons[event["reason"]] += 1
                 elif event["event"] == "copy_growth_lead":
-                    self.lead_shapes[tuple(event["shape"])] += 1
+                    shape = event["shape"]
+                    if isinstance(shape, dict):
+                        shape_key = (shape["height"], shape["width"], shape["packed"])
+                    else:
+                        # Compatibility with traces written before shape notes
+                        # included cell and sequence metadata.
+                        shape_key = tuple(shape)
+                    self.lead_shapes[shape_key] += 1
                     self.recent_leads.append(event | {"worker": int(worker.name[-3:])})
                     self.recent_leads = self.recent_leads[-100:]
                 elif event["event"] == "interesting_shape":
