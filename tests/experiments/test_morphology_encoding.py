@@ -5,6 +5,7 @@ import pytest
 
 from emergent.experiments.morphology_interactions.canonical import canonicalize_grid
 from emergent.experiments.morphology_interactions.encoding import (
+    audit_encodings,
     exact_identity_vector,
     make_encoder,
 )
@@ -60,3 +61,20 @@ def test_scaled_encoding_rejects_invalid_exponents() -> None:
         encoder.encode_scaled(shape, exponent=-1.0)
     with pytest.raises(ValueError, match="exponent"):
         encoder.encode_scaled(shape, exponent=np.inf)
+
+
+def test_encoding_audit_reports_exact_and_empirical_counts() -> None:
+    keys = [
+        canonicalize_grid(np.asarray([[1]], dtype=np.uint8)),
+        canonicalize_grid(np.asarray([[1, 1]], dtype=np.uint8)),
+    ]
+
+    audit = audit_encodings(keys, universe_seed=42, identity_dim=8)
+
+    assert audit["unique_shape_keys"] == 2
+    assert audit["unique_exact_identity_vectors"] == 2
+    assert audit["exact_identity_collisions"] == 0
+    assert audit["unique_scaled_interaction_vectors"] == 2
+    assert audit["scaled_vector_collisions"] == 0
+    assert audit["cell_count_min"] == 1
+    assert audit["cell_count_max"] == 2

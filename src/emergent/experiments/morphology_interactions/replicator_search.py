@@ -44,7 +44,7 @@ from .canonical import (
     shape_key_sort_key,
 )
 from .components import MOORE_OFFSETS, detect_components, detect_components_batch
-from .encoding import deterministic_uint64
+from .encoding import audit_encodings, deterministic_uint64
 
 NATIVE_RULE = "B3/S23"
 TraceRow = dict[str, int | float | bool | str]
@@ -823,6 +823,19 @@ def write_search_artifacts(
         if trace_fields:
             writer.writeheader()
             writer.writerows(result.trace)
+    (target / "identity_audit.json").write_text(
+        json.dumps(
+            audit_encodings(
+                result.evaluations,
+                universe_seed=result.config.seed,
+                identity_dim=32,
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (target / "best_pattern.txt").write_text(
         matrix_to_text(result.best_candidate.matrix) + "\n",
         encoding="utf-8",

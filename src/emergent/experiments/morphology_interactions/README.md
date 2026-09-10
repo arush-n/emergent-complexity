@@ -292,7 +292,10 @@ Search artifacts include the initial `best_pattern.npz` and the exact
 `best_state.npz` at the score's recorded generation, so a claimed hit can be
 rescored independently with `evaluate_candidate_state`. `history.csv` tracks
 generation winners, while `trace.csv` records every unique candidate's exact
-identity and scored evidence at each search generation.
+identity and scored evidence at each search generation. `identity_audit.json`
+is generated automatically and records exact-key/vector counts, empirical
+collision counts for the fixed-dimensional encodings, and the measured error
+in the explicit size-scaled vector norm.
 
 ## Artifacts and reproducibility
 

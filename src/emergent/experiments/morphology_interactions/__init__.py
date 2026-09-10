@@ -21,6 +21,7 @@ from .components import (
 from .config import MorphologyExperimentConfig
 from .encoding import (
     MorphologyEncoder,
+    audit_encodings,
     encode_shape,
     exact_identity_vector,
     make_encoder,
@@ -103,6 +104,7 @@ __all__ = [
     "SpeciesRecord",
     "SpeciesRegistry",
     "build_interaction_zone",
+    "audit_encodings",
     "calculate_interaction",
     "calculate_interaction_vector",
     "canonical_matrix",

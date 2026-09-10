@@ -126,6 +126,7 @@ def test_small_search_replays_exactly(tmp_path) -> None:
     assert (output_dir / "summary.json").exists()
     assert (output_dir / "history.csv").exists()
     assert (output_dir / "trace.csv").exists()
+    assert (output_dir / "identity_audit.json").exists()
     assert len(first.trace) >= len(first.history)
     with np.load(output_dir / "best_state.npz") as artifact:
         np.testing.assert_array_equal(artifact["grid"], first.best_state)

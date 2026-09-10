@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import operator
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,6 +45,61 @@ def exact_identity_vector(shape: ShapeKey | np.ndarray) -> np.ndarray:
     header = np.asarray([height, width], dtype=np.int64)
     cells = np.asarray(matrix, dtype=np.int64).reshape(-1)
     return np.concatenate((header, cells))
+
+
+def audit_encodings(
+    shapes: Iterable[ShapeKey],
+    *,
+    universe_seed: int,
+    identity_dim: int = 32,
+    scaled_exponent: float = 0.5,
+) -> dict[str, Any]:
+    """Audit exact identity and empirical interaction-vector uniqueness.
+
+    Exact uniqueness is guaranteed by the canonical dimensions and bits. The
+    fixed-dimensional counts are deliberately reported as empirical collision
+    checks, not identity guarantees: a lossy finite vector can theoretically
+    collide even when a sampled run does not.
+    """
+
+    unique_keys = sorted(set(shapes))
+    encoder = make_encoder(universe_seed=universe_seed, identity_dim=identity_dim)
+    exact_signatures: set[tuple[tuple[int, ...], bytes]] = set()
+    unit_signatures: set[bytes] = set()
+    scaled_signatures: set[bytes] = set()
+    cell_counts: list[int] = []
+    scaled_norm_errors: list[float] = []
+    exact_lengths: list[int] = []
+    for key in unique_keys:
+        exact = exact_identity_vector(key)
+        exact_signatures.add((exact.shape, exact.tobytes()))
+        unit_signatures.add(encoder.encode(key).tobytes())
+        scaled = encoder.encode_scaled(key, exponent=scaled_exponent)
+        scaled_signatures.add(scaled.tobytes())
+        cell_count = int(matrix_from_shape_key(key).sum())
+        cell_counts.append(cell_count)
+        exact_lengths.append(int(exact.size))
+        scaled_norm_errors.append(
+            abs(float(np.linalg.norm(scaled)) - cell_count ** float(scaled_exponent))
+        )
+
+    count = len(unique_keys)
+    return {
+        "unique_shape_keys": count,
+        "unique_exact_identity_vectors": len(exact_signatures),
+        "exact_identity_collisions": count - len(exact_signatures),
+        "unique_unit_interaction_vectors": len(unit_signatures),
+        "unit_vector_collisions": count - len(unit_signatures),
+        "unique_scaled_interaction_vectors": len(scaled_signatures),
+        "scaled_vector_collisions": count - len(scaled_signatures),
+        "identity_dim": int(identity_dim),
+        "scaled_exponent": float(scaled_exponent),
+        "cell_count_min": min(cell_counts) if cell_counts else None,
+        "cell_count_max": max(cell_counts) if cell_counts else None,
+        "exact_identity_vector_length_min": min(exact_lengths) if exact_lengths else None,
+        "exact_identity_vector_length_max": max(exact_lengths) if exact_lengths else None,
+        "scaled_norm_error_max": max(scaled_norm_errors) if scaled_norm_errors else 0.0,
+    }
 
 
 def _seed_bytes(seed: int) -> bytes:
