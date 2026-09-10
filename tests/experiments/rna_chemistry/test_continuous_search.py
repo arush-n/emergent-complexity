@@ -11,10 +11,14 @@ from emergent.experiments.morphology_interactions.rna_chemistry.search.runtime i
     ExactCycle,
     pack_grids,
     prepare,
+    prepare_batch,
     rule_code,
     state_bytes,
     step_fields,
     unpack_grids,
+)
+from emergent.experiments.morphology_interactions.rna_chemistry.search.schedule import (
+    plan_for_trial,
 )
 
 
@@ -55,6 +59,58 @@ def test_parallel_preparation_matches_scalar_chemistry(lifetime):
         np.testing.assert_array_equal(grid, expected.grid)
         assert state_bytes(parallel, grid) == state_bytes(scalar, expected.grid)
     assert saw_sites > 0
+
+
+def test_batched_preparation_matches_scalar_rule_fields():
+    config = RNAExperimentConfig(
+        width=16,
+        height=16,
+        warmup_steps=0,
+        calibration_size=32,
+        component_backend="python",
+        binding_lifetime_mode="instant",
+    )
+    grids = np.random.default_rng(92).random((4, 16, 16)) < 0.18
+    grids = grids.astype(np.uint8)
+    universe = RNAChemistryEngine(config, initial_grid=grids[0]).universe
+    scalar_engines = [
+        RNAChemistryEngine(config, initial_grid=grid, universe=universe) for grid in grids
+    ]
+    batch_engines = [
+        RNAChemistryEngine(config, initial_grid=grid, universe=universe) for grid in grids
+    ]
+    scalar = [prepare(engine, grid) for engine, grid in zip(scalar_engines, grids)]
+    batch = prepare_batch(batch_engines, grids)
+    for (scalar_rules, scalar_sites), details in zip(scalar, batch):
+        np.testing.assert_array_equal(details.rules, scalar_rules)
+        assert details.active_zone_count == scalar_sites
+
+
+def test_trial_schedule_keys_configs_and_replacements_are_deterministic():
+    base = RNAExperimentConfig(width=8, height=8, calibration_size=32)
+    plans = [
+        plan_for_trial(base, trial=index, schedule_index=index, mode="rotating")
+        for index in range(10)
+    ]
+    assert len({plan.trial_key for plan in plans}) == len(plans)
+    assert len({plan.initial_seed for plan in plans}) == len(plans)
+    assert all(
+        plans[index].strategy.key != plans[index - 1].strategy.key for index in range(1, 10)
+    )
+    replacement = plan_for_trial(
+        base,
+        trial=11,
+        schedule_index=0,
+        mode="rotating",
+        previous_strategy=plans[0].strategy.key,
+    )
+    assert replacement.strategy.key != plans[0].strategy.key
+    fixed = [
+        plan_for_trial(base, trial=index, schedule_index=index, mode="fixed")
+        for index in range(4)
+    ]
+    assert len({plan.config_key for plan in fixed}) == 1
+    assert len({plan.trial_key for plan in fixed}) == len(fixed)
 
 
 def test_cycle_detection_handles_long_period_and_transient_exactly():
@@ -102,6 +158,10 @@ def test_refilled_search_trace_replays_chemistry_and_every_transition(tmp_path):
             "12",
             "--density",
             "0.02",
+            "--warmup-steps",
+            "0",
+            "--strategy-schedule",
+            "fixed",
             "--trace-chunk",
             "5",
             "--component-backend",
@@ -119,3 +179,15 @@ def test_refilled_search_trace_replays_chemistry_and_every_transition(tmp_path):
         for line in (tmp_path / "worker_000" / "events.jsonl").read_text().splitlines()
     ]
     assert sum(event["event"] == "start" for event in events) > 3
+    terminals = [event for event in events if event["event"] == "terminal"]
+    assert terminals
+    assert all(event["failure"] and event["outcome"] == "failure" for event in terminals)
+    replacements = [
+        event
+        for event in events
+        if event["event"] == "start" and event["replaces_trial"] is not None
+    ]
+    assert replacements
+    assert len({event["trial_key"] for event in events if event["event"] == "start"}) == sum(
+        event["event"] == "start" for event in events
+    )

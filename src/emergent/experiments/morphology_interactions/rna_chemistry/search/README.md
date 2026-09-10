@@ -12,17 +12,25 @@ this deterministic chemistry, but the required time can be extremely long.
 ```bash
 .venv/bin/python -m emergent.experiments.morphology_interactions.rna_chemistry.search.run \
   --output-dir artifacts/experiments/morphology_interactions/rna_chemistry/search/continuous \
-  --workers 8 --batch-size 64 --size 128 --density 0.04 \
+  --workers 8 --batch-size 64 --size 128 \
   --binding-lifetime-mode energy
 ```
 
 There are `workers × batch-size` simultaneous environments. Each process
 prepares spatial chemistry independently, then advances its entire batch in
 one JAX call. Finished slots are immediately refilled. Process counts and
-batch sizes affect resources, not per-trial physics. Trial assignment is
-deterministic within a worker configuration; changing the worker count changes
-which trial IDs are reached first. Universe seed and initial-grid seed are
-recorded separately.
+batch sizes affect resources, not per-trial physics. The default rotating
+schedule gives each replacement a different deterministic strategy/configuration
+(density, folding, lifetime, and interaction radius). Use
+`--strategy-schedule fixed` for a single-configuration control.
+
+Every trial has a stable `trial_key`, resolved `config_key`, initial-state key,
+and composite test key. Duplicate `(configuration, initial state)` tests are
+skipped. Terminal worlds are recorded as failed trials (`failure: true`) with
+their exact reason (`extinct`, `stable`, or `repeat`) and then replaced. The
+replacement `start` event points to the failed trial and records its new
+strategy/configuration. Universe seed and initial-grid seed are recorded
+separately.
 
 The same RNA laws apply to every morphology: variable-length surface sequences,
 complementary binding sites, motifs, bounded effects per site, optional folding,
@@ -51,8 +59,10 @@ The output contains a Python source archive with SHA-256 checksums, launch
 arguments, and one directory per worker. Each worker records:
 
 - `manifest.json`: full chemistry configuration, calibration, versions, and device;
-- `events.jsonl`: initial seeds, trial IDs, copy-growth leads, and terminal events;
-- `status.json`: live throughput, ages, completed trials, and binding activity;
+- `events.jsonl`: keyed starts, failed terminal trials, copy-growth leads, and
+  first-seen interesting shapes/interactions;
+- `status.json`: live throughput, ages, terminal failures, unique test keys, and
+  chemistry activity;
 - `trace_*.npz`: every grid before/after every transition and its applied rule field;
   grids are little-endian bit-packed on disk to keep large-world archival practical;
 - `stopped.json`: present only after a graceful worker stop or failure cleanup.
@@ -61,9 +71,17 @@ Rule-field integers use bits 0–8 for births and 9–17 for survival. Their sha
 is `(ticks, environments, height, width)`. Trial IDs and source ages identify
 each transition, including slot replacements. Chemistry can be regenerated
 from initial seed, recorded configuration, and archived source. Every growth
-lead includes `worker`, `slot`, `trial`, `generation`, and `trace_tick`, so the
-corresponding grid and per-cell rule field can be opened directly in the
-viewer or replayed exactly.
+lead and interesting chemistry event includes the trial strategy, resolved
+configuration key, generation, and `trace_tick`, so the corresponding grid and
+per-cell rule field can be opened directly in the viewer or replayed exactly.
+Shape notes contain the exact packed morphology and sequence length; interaction
+notes contain binding-site counts, energies, motifs, and site-effect strengths.
+
+The dense grid transition is JAX-backed and stays as a device array between
+steps. Chemistry and component lists are ragged, so exact canonicalization,
+binding-site selection, and event serialization remain deterministic host-side
+bookkeeping. Batched component labeling and one batched JAX transition keep
+that unavoidable boundary narrow.
 
 ```bash
 .venv/bin/python -m emergent.experiments.morphology_interactions.rna_chemistry.search.replay \

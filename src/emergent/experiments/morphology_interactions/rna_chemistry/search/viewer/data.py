@@ -53,7 +53,12 @@ class TraceReader:
         self.event_offsets = {}
         self.lead_shapes = Counter()
         self.terminal_reasons = Counter()
+        self.strategy_counts = Counter()
+        self.interesting_shape_count = 0
+        self.interesting_interaction_count = 0
+        self.trial_strategies = {}
         self.recent_leads = []
+        self.recent_interactions = []
 
     def worker(self, index: int) -> Path:
         if index < 0 or index > 999:
@@ -83,12 +88,24 @@ class TraceReader:
                     break
                 event = json.loads(line)
                 self.event_offsets[path] = handle.tell()
-                if event["event"] == "terminal":
+                if event["event"] == "start":
+                    strategy = event.get("strategy_key", "legacy")
+                    self.strategy_counts[strategy] += 1
+                    self.trial_strategies[int(event["trial"])] = strategy
+                elif event["event"] == "terminal":
                     self.terminal_reasons[event["reason"]] += 1
                 elif event["event"] == "copy_growth_lead":
                     self.lead_shapes[tuple(event["shape"])] += 1
                     self.recent_leads.append(event | {"worker": int(worker.name[-3:])})
                     self.recent_leads = self.recent_leads[-100:]
+                elif event["event"] == "interesting_shape":
+                    self.interesting_shape_count += 1
+                elif event["event"] == "interesting_interaction":
+                    self.interesting_interaction_count += 1
+                    self.recent_interactions.append(
+                        event | {"worker": int(worker.name[-3:])}
+                    )
+                    self.recent_interactions = self.recent_interactions[-100:]
 
     def overview(self) -> dict:
         with self.lock:
@@ -130,6 +147,9 @@ class TraceReader:
                             "worker": int(worker.name[-3:]),
                             "slot": slot,
                             "trial": int(data["trials"][-1, slot]),
+                            "strategy": self.trial_strategies.get(
+                                int(data["trials"][-1, slot]), "unknown"
+                            ),
                             "age": int(data["ages"][-1, slot]) + 1,
                             "tick": int(traces[-1].stem.split("_")[1]) + len(data["ages"]) - 1,
                             "height": grid.shape[0],
@@ -164,6 +184,10 @@ class TraceReader:
                 "lead_shapes": shapes,
                 "recent_leads": self.recent_leads[-20:],
                 "terminal_reasons": dict(self.terminal_reasons),
+                "strategy_counts": dict(self.strategy_counts),
+                "interesting_shape_count": self.interesting_shape_count,
+                "interesting_interaction_count": self.interesting_interaction_count,
+                "recent_interactions": self.recent_interactions[-20:],
                 "config": configs[0]["config"] if configs else {},
                 "backend": configs[0]["backend"] if configs else "unknown",
                 "confirmed_replicators": None,

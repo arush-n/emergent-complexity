@@ -236,6 +236,7 @@ class RNAChemistryEngine:
         self.sequence_cache: dict[ShapeKey, ChemicalSequence] = {}
         self.kmer_index_cache: dict[tuple[ShapeKey, int, bool], KmerIndex] = {}
         self.pair_cache: dict[tuple[ShapeKey, ShapeKey], PairChemistry] = {}
+        self._canonical_cache: dict[tuple[tuple[int, int], bytes], ShapeKey] = {}
         self.accessibility_cache = AccessibilityCache(
             mode=config.accessibility_mode,
             minimum_hairpin_separation=config.minimum_hairpin_separation,
@@ -271,15 +272,34 @@ class RNAChemistryEngine:
             min_component_cells=self.config.min_component_cells,
             backend=self.config.component_backend,
         )
+        return self._observe_components(components)
+
+    def _observe_components(
+        self,
+        components: list[Component],
+    ) -> tuple[list[Component], list[tuple[Component, ShapeKey, ChemicalSequence]], int]:
+        """Register pre-detected components without running detection twice."""
+
         observations: list[tuple[Component, ShapeKey, ChemicalSequence]] = []
         new_species = 0
         for component in components:
-            key = canonicalize_component(
-                component,
-                grid_shape=(self.height, self.width),
-                rotation_invariant=self.config.rotation_invariant,
-                reflection_invariant=self.config.reflection_invariant,
-            )
+            shifted = component.coordinates - component.coordinates.min(axis=0)
+            cache_key: tuple[tuple[int, int], bytes] | None = None
+            if (
+                int(shifted[:, 0].max()) < self.height - 1
+                and int(shifted[:, 1].max()) < self.width - 1
+            ):
+                cache_key = (tuple(shifted.shape), shifted.tobytes())
+            key = self._canonical_cache.get(cache_key) if cache_key is not None else None
+            if key is None:
+                key = canonicalize_component(
+                    component,
+                    grid_shape=(self.height, self.width),
+                    rotation_invariant=self.config.rotation_invariant,
+                    reflection_invariant=self.config.reflection_invariant,
+                )
+                if cache_key is not None:
+                    self._canonical_cache[cache_key] = key
             sequence = self.sequence_cache.get(key)
             if sequence is None:
                 sequence = sequence_from_shape_key(key, mode=self.config.sequence_mode)
