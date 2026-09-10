@@ -283,23 +283,7 @@ class RNAChemistryEngine:
         observations: list[tuple[Component, ShapeKey, ChemicalSequence]] = []
         new_species = 0
         for component in components:
-            shifted = component.coordinates - component.coordinates.min(axis=0)
-            cache_key: tuple[tuple[int, int], bytes] | None = None
-            if (
-                int(shifted[:, 0].max()) < self.height - 1
-                and int(shifted[:, 1].max()) < self.width - 1
-            ):
-                cache_key = (tuple(shifted.shape), shifted.tobytes())
-            key = self._canonical_cache.get(cache_key) if cache_key is not None else None
-            if key is None:
-                key = canonicalize_component(
-                    component,
-                    grid_shape=(self.height, self.width),
-                    rotation_invariant=self.config.rotation_invariant,
-                    reflection_invariant=self.config.reflection_invariant,
-                )
-                if cache_key is not None:
-                    self._canonical_cache[cache_key] = key
+            key = self._canonical_key(component)
             sequence = self.sequence_cache.get(key)
             if sequence is None:
                 sequence = sequence_from_shape_key(key, mode=self.config.sequence_mode)
@@ -312,6 +296,28 @@ class RNAChemistryEngine:
             new_species += int(is_new)
             observations.append((component, key, sequence))
         return components, observations, new_species
+
+    def _canonical_key(self, component: Component) -> ShapeKey:
+        """Return one exact key, reusing the translation-invariant host cache."""
+
+        shifted = component.coordinates - component.coordinates.min(axis=0)
+        cache_key: tuple[tuple[int, int], bytes] | None = None
+        if (
+            int(shifted[:, 0].max()) < self.height - 1
+            and int(shifted[:, 1].max()) < self.width - 1
+        ):
+            cache_key = (tuple(shifted.shape), shifted.tobytes())
+        key = self._canonical_cache.get(cache_key) if cache_key is not None else None
+        if key is None:
+            key = canonicalize_component(
+                component,
+                grid_shape=(self.height, self.width),
+                rotation_invariant=self.config.rotation_invariant,
+                reflection_invariant=self.config.reflection_invariant,
+            )
+            if cache_key is not None:
+                self._canonical_cache[cache_key] = key
+        return key
 
     def _pair_chemistry(
         self,

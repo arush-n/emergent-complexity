@@ -68,9 +68,12 @@ def _component_keys(
     components: list[Component],
     config: RNAExperimentConfig,
     grid_shape: tuple[int, int],
+    engine: RNAChemistryEngine | None = None,
 ) -> Counter[ShapeKey]:
     return Counter(
-        canonicalize_component(
+        engine._canonical_key(component)
+        if engine is not None
+        else canonicalize_component(
             component,
             grid_shape=grid_shape,
             rotation_invariant=config.rotation_invariant,
@@ -94,6 +97,7 @@ def shape_counts(grid: np.ndarray, config: RNAExperimentConfig) -> Counter[Shape
 def shape_counts_and_components(
     grid: np.ndarray,
     config: RNAExperimentConfig,
+    engine: RNAChemistryEngine | None = None,
 ) -> tuple[Counter[ShapeKey], list[Component]]:
     """Detect one grid once and return both telemetry and next-step evidence."""
 
@@ -102,18 +106,21 @@ def shape_counts_and_components(
         min_component_cells=config.min_component_cells,
         backend=config.component_backend,
     )
-    return _component_keys(components, config, grid.shape), components
+    return _component_keys(components, config, grid.shape, engine), components
 
 
 def shape_counts_and_components_batch(
     grids: np.ndarray,
     configs: list[RNAExperimentConfig],
+    engines: list[RNAChemistryEngine] | None = None,
 ) -> tuple[list[Counter[ShapeKey]], list[list[Component]]]:
     """Batch host-side component labeling while preserving per-trial settings."""
 
     values = np.asarray(grids, dtype=np.uint8)
     if values.ndim != 3 or len(configs) != values.shape[0]:
         raise ValueError("grids and configs must describe a matching batch")
+    if engines is not None and len(engines) != len(configs):
+        raise ValueError("engines and configs must describe a matching batch")
     groups: dict[tuple[int, str], list[int]] = {}
     for index, config in enumerate(configs):
         groups.setdefault((config.min_component_cells, config.component_backend), []).append(index)
@@ -127,7 +134,12 @@ def shape_counts_and_components_batch(
         )
         for index, components in zip(indices, detected):
             components_by_environment[index] = components
-            counts[index] = _component_keys(components, configs[index], values.shape[1:])
+            counts[index] = _component_keys(
+                components,
+                configs[index],
+                values.shape[1:],
+                None if engines is None else engines[index],
+            )
     return (
         [item if item is not None else Counter() for item in counts],
         [item if item is not None else [] for item in components_by_environment],
@@ -329,7 +341,7 @@ def run_worker(args: argparse.Namespace) -> None:
         baseline: Counter[ShapeKey] = Counter()
         components: list[Component] | None = None
         if bootstrap:
-            baseline, components = shape_counts_and_components(grid, config)
+            baseline, components = shape_counts_and_components(grid, config, engine)
         write_event(
             {
                 "event": "start",
@@ -365,7 +377,7 @@ def run_worker(args: argparse.Namespace) -> None:
         plans.append(plan)
         cached_components.append(components)
     initial_counts, initial_components = shape_counts_and_components_batch(
-        np.stack(grids), [engine.config for engine in engines]
+        np.stack(grids), [engine.config for engine in engines], engines
     )
     for slot in range(args.batch_size):
         baselines[slot] = initial_counts[slot]
@@ -502,6 +514,7 @@ def run_worker(args: argparse.Namespace) -> None:
             counts_after, components_after = shape_counts_and_components_batch(
                 following,
                 [engine.config for engine in engines],
+                engines,
             )
             for slot, engine in enumerate(engines):
                 engine.generation += 1
