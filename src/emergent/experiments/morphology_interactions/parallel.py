@@ -411,6 +411,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--density", type=float, default=0.10)
     parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--identity-dim", type=int, default=32)
+    parser.add_argument("--max-rule-changes", type=int, default=2)
+    parser.add_argument("--interaction-threshold", type=float, default=0.35)
     parser.add_argument("--detect-every", type=int, default=1)
     parser.add_argument("--metrics-every", type=int, default=1)
     parser.add_argument(
@@ -439,6 +442,9 @@ def main(argv: list[str] | None = None) -> None:
         steps=args.steps,
         warmup_steps=args.warmup_steps,
         alpha=args.alpha,
+        identity_dim=args.identity_dim,
+        max_rule_changes=args.max_rule_changes,
+        interaction_threshold=args.interaction_threshold,
         detect_every=args.detect_every,
         metrics_every=args.metrics_every,
         component_backend=args.component_backend,

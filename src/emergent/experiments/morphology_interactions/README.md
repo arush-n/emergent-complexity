@@ -224,6 +224,7 @@ labeling is batched on the host when the selected SciPy backend is active.
 ```bash
 python -m emergent.experiments.morphology_interactions.parallel \
   --num-envs 1000 --size 24 --steps 20 --warmup-steps 5 \
+  --identity-dim 32 --max-rule-changes 2 \
   --batch-size 250 --host-workers 0 --pair-capacity 256 \
   --shared-universe-seed 42 --no-metrics
 ```
@@ -260,6 +261,25 @@ result = run_parallel(
     collect_metrics=False,
 )
 ```
+
+For a larger high-dimensional trial with automatic diversity and throughput
+artifacts, use the scale probe:
+
+```bash
+python -m emergent.experiments.morphology_interactions.benchmarks.scale \
+  --num-envs 512 --size 64 --steps 200 --warmup-steps 40 \
+  --identity-dim 256 --max-rule-changes 6 --batch-size 128 \
+  --pair-capacity 1024 --shared-universe-seed 42 \
+  --output-dir artifacts/experiments/morphology_interactions/benchmarks/scale_d256
+```
+
+This keeps one fixed universe law shared across all environments, while each
+environment receives its own deterministic starting grid. It reports global
+unique species, pair laws, effective local rules, per-generation metrics, and
+an exact/empirical identity-vector audit. Increasing `identity_dim` expands
+the structured interaction coordinates; increasing `max_rule_changes` expands
+how much of the 18-channel interaction vector can affect local B/S physics.
+Both are explicit physical parameters and must be held fixed in comparisons.
 
 ## Self-replication search
 
