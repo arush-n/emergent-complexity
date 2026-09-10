@@ -20,6 +20,7 @@ from .canonical import (
     shape_key_from_matrix,
     shape_key_sort_key,
 )
+from .components import MOORE_OFFSETS
 from .interaction import make_interaction_universe, make_pair_interaction
 from .sweep import parse_alphas
 
@@ -42,6 +43,29 @@ def _canonical_input(shape: ShapeKey | Any) -> tuple[ShapeKey, np.ndarray]:
     return shape_key_from_matrix(matrix), matrix
 
 
+def _is_single_8_connected(coordinates: set[tuple[int, int]]) -> bool:
+    """Return whether local coordinates form exactly one Moore component.
+
+    Sensitivity candidates are local, unwrapped morphologies.  Using the
+    toroidal detector here would incorrectly join cells on opposite edges of
+    the candidate's bounding matrix, so this small non-toroidal check is
+    intentional.
+    """
+
+    if not coordinates:
+        return False
+    visited = {min(coordinates)}
+    pending = [next(iter(visited))]
+    while pending:
+        row, col = pending.pop()
+        for row_delta, col_delta in MOORE_OFFSETS:
+            neighbor = (row + row_delta, col + col_delta)
+            if neighbor in coordinates and neighbor not in visited:
+                visited.add(neighbor)
+                pending.append(neighbor)
+    return len(visited) == len(coordinates)
+
+
 def single_cell_perturbations(shape: ShapeKey | Any) -> list[ShapePerturbation]:
     """Generate deterministic add/remove-one-cell candidates around ``shape``."""
 
@@ -57,7 +81,10 @@ def single_cell_perturbations(shape: ShapeKey | Any) -> list[ShapePerturbation]:
                 added = (row + row_delta, col + col_delta)
                 if added in live_coordinates:
                     continue
-                coordinates = sorted(live_coordinates | {added})
+                candidate_coordinates = live_coordinates | {added}
+                if not _is_single_8_connected(candidate_coordinates):
+                    continue
+                coordinates = sorted(candidate_coordinates)
                 candidate_matrix = canonical_matrix(np.asarray(coordinates, dtype=np.int64))
                 key = shape_key_from_matrix(candidate_matrix)
                 candidates.setdefault(
@@ -68,7 +95,12 @@ def single_cell_perturbations(shape: ShapeKey | Any) -> list[ShapePerturbation]:
     for removed in sorted(live_coordinates):
         if len(live_coordinates) == 1:
             continue
-        coordinates = sorted(live_coordinates - {removed})
+        candidate_coordinates = live_coordinates - {removed}
+        # Removing a bridge must produce two organisms in the real engine,
+        # not a disconnected union treated as one hypothetical species.
+        if not _is_single_8_connected(candidate_coordinates):
+            continue
+        coordinates = sorted(candidate_coordinates)
         candidate_matrix = canonical_matrix(np.asarray(coordinates, dtype=np.int64))
         key = shape_key_from_matrix(candidate_matrix)
         candidates.setdefault(

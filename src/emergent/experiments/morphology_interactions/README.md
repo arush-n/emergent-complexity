@@ -77,9 +77,12 @@ morphology recovers the same `ShapeKey`.
 
 Each canonical shape also receives a fixed-dimensional encoding `z_A` with
 default dimension 32. The encoding combines a universe-seeded Fourier-like
-coordinate embedding with explicit morphology statistics: cell count,
-bounding-box density, aspect ratio, perimeter, and horizontal/vertical
-symmetry. Frequencies are generated once when the universe is created.
+coordinate embedding with explicit, comparably scaled morphology statistics:
+a bounded `log1p(cell_count)`, bounding-box density, bounded aspect ratio,
+perimeter, and horizontal/vertical symmetry. Frequencies are generated once
+when the universe is created. The bounded transforms prevent a large
+transient component's raw cell count or aspect ratio from suppressing its
+geometric information after unit normalization.
 
 For each unordered pair of species, the universe caches two 18-channel
 vectors:
@@ -90,10 +93,15 @@ q(A,B) = BLAKE2b(universe_seed, canonical_A, canonical_B, channel)
 v_alpha(A,B) = (1-alpha) * u(A,B) + alpha * q(A,B)
 ```
 
-The `W_k` matrices are fixed and symmetric. `q` is deterministic
-pseudorandomness, not the identity. The unordered pair key is sorted before
-both cache lookup and BLAKE2b input, so symmetric mode satisfies
-`F(A,B) == F(B,A)` exactly.
+The `W_k` matrices are fixed and symmetric. Their fixed gain is calibrated
+once so representative structured and scrambled channels have comparable
+marginal mean magnitude and default-threshold activation. It is not fitted
+per pair, generation, or run, and is recorded as `structured_weight_scale`
+in the manifest. `q` is deterministic pseudorandomness, not the identity.
+The unordered pair key is sorted before both cache lookup and BLAKE2b input,
+so symmetric mode satisfies `F(A,B) == F(B,A)` exactly. This calibration is
+important for alpha sweeps: changing alpha should primarily change landscape
+structure/predictability rather than simply turn on many more rule channels.
 
 The 18 channels are nine birth and nine survival decisions. A pair changes at
 most `max_rule_changes=2` channels, only when a channel magnitude reaches
@@ -301,6 +309,8 @@ The experiment tests cover:
 - bounded local B/S projection and deterministic overlap ownership;
 - exact native CGOL compatibility when no zones are active;
 - species/pair reappearance and symmetric interactions;
+- structured/scrambled marginal calibration and bounded large-shape statistics;
+- connected single-cell sensitivity candidates and sparse-metrics accounting;
 - scalar-versus-batched replay parity; and
 - randomized complete-run determinism.
 
@@ -342,7 +352,7 @@ this package README is the version-controlled contract.
 
 ## Current verification snapshot
 
-On the development machine, the full suite passes with 99 tests. A final CPU
+On the development machine, the full suite passes with 103 tests. A final CPU
 scale check using 1,000 environments, 24×24 grids, 20 steps, batch size 250,
 shared universe seed 42, and metrics disabled completed at approximately
 3,500 active-interaction transitions/sec. The corresponding interaction-

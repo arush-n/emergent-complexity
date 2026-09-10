@@ -13,7 +13,7 @@ from .canonical import ShapeKey, matrix_from_shape_key
 
 UINT64_SCALE = float(2**64)
 MORPHOLOGY_STATISTICS = (
-    "cell_count",
+    "log_cell_count",
     "bounding_box_density",
     "aspect_ratio",
     "normalized_perimeter",
@@ -82,7 +82,15 @@ def _as_canonical_matrix(shape: ShapeKey | Any) -> np.ndarray:
 
 
 def morphology_statistics(shape: ShapeKey | Any) -> np.ndarray:
-    """Return explicit morphology statistics in the documented order."""
+    """Return explicitly scaled morphology statistics in the documented order.
+
+    The statistics are deliberately kept on comparable, order-one scales
+    before they are concatenated with the Fourier features.  In particular,
+    raw cell count would dominate the unit normalization for large transient
+    components, so it uses a bounded ``log1p`` transform.  Aspect ratio uses
+    the same bounded convention so extremely elongated shapes cannot dominate
+    either.
+    """
 
     matrix = _as_canonical_matrix(shape)
     height, width = matrix.shape
@@ -102,11 +110,15 @@ def morphology_statistics(shape: ShapeKey | Any) -> np.ndarray:
                 perimeter += 1
     horizontal_symmetry = float(np.mean(matrix == np.fliplr(matrix)))
     vertical_symmetry = float(np.mean(matrix == np.flipud(matrix)))
+    log_cell_count = np.log1p(float(cell_count))
+    bounded_log_cell_count = log_cell_count / (1.0 + log_cell_count)
+    aspect_ratio = float(width) / float(height)
+    bounded_aspect_ratio = aspect_ratio / (1.0 + aspect_ratio)
     return np.asarray(
         [
-            float(cell_count),
+            bounded_log_cell_count,
             cell_count / float(height * width),
-            width / float(height),
+            bounded_aspect_ratio,
             perimeter / float(4 * cell_count),
             horizontal_symmetry,
             vertical_symmetry,

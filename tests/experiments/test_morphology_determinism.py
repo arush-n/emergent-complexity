@@ -83,3 +83,23 @@ def test_complete_engine_replay_has_identical_deterministic_outputs() -> None:
             second.interaction_cache[pair].final_vector,
         )
         assert first.interaction_cache[pair].encounters == second.interaction_cache[pair].encounters
+
+
+def test_sparse_metrics_do_not_lose_species_discoveries_from_summary() -> None:
+    initial = np.zeros((8, 8), dtype=np.uint8)
+    initial[3:5, 3:5] = 1
+    config = MorphologyExperimentConfig(
+        width=8,
+        height=8,
+        seed=19,
+        steps=2,
+        warmup_steps=0,
+        interactions_enabled=False,
+        metrics_every=2,
+    )
+
+    result = MorphologyInteractionEngine(config, initial_grid=initial).run()
+
+    assert len(result.species_registry) == 1
+    assert result.summary["total_new_species"] == len(result.species_registry)
+    assert sum(int(row["new_species_this_step"]) for row in result.generation_records) == 0

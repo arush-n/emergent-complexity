@@ -21,7 +21,11 @@ from .encoding import MorphologyEncoder, deterministic_uint64
 
 CHANNEL_COUNT = 18
 NEIGHBOR_COUNT = 9
-STRUCTURED_WEIGHT_SCALE = 2.0
+# Calibrated once against deterministic canonical-shape pairs so the
+# structured law has a comparable marginal magnitude and default threshold
+# activation rate to q(A, B), whose channels are uniform on [-1, 1].  This is
+# a fixed universe constant: it is not fitted per pair, generation, or run.
+STRUCTURED_WEIGHT_SCALE = 11.0
 
 
 def _as_rule(rule: Rule | str) -> Rule:
@@ -50,9 +54,10 @@ def _make_structured_weights(universe_seed: int, identity_dim: int) -> np.ndarra
         ],
         dtype=np.float64,
     )
-    # Encodings are unit-norm vectors.  A modest fixed gain keeps the
-    # structured landscape visible through the default 0.35 rule-projection
-    # threshold while preserving the requested beta/sqrt(d) bilinear form.
+    # Encodings are unit-norm vectors.  The fixed calibrated gain keeps the
+    # structured landscape on the same typical magnitude scale as the
+    # uniform scrambled law while preserving the requested beta/sqrt(d)
+    # bilinear form.
     values = (STRUCTURED_WEIGHT_SCALE * (2.0 * values - 1.0)).reshape(
         (CHANNEL_COUNT, identity_dim, identity_dim)
     )

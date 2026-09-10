@@ -39,6 +39,7 @@ class MetricsTracker:
     total_cells: int
     records: list[dict[str, int | float]] = field(default_factory=list)
     _seen_rule_ids: set[int] = field(default_factory=set, init=False, repr=False)
+    _total_active_interactions: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.total_cells, int) or self.total_cells <= 0:
@@ -98,7 +99,9 @@ class MetricsTracker:
     def observe_interactions(self, interactions: Iterable[PairInteraction]) -> None:
         """Include encountered local rules even when metrics are sampled sparsely."""
 
-        self._seen_rule_ids.update(int(item.rule_id) for item in interactions)
+        observed = list(interactions)
+        self._seen_rule_ids.update(int(item.rule_id) for item in observed)
+        self._total_active_interactions += len(observed)
 
     def summary(
         self,
@@ -119,12 +122,11 @@ class MetricsTracker:
             "unique_species_total": len(registry),
             "unique_interaction_pairs_total": len(cache),
             "unique_local_rules_total": int(len(self._seen_rule_ids)),
-            "total_new_species": int(
-                sum(int(row["new_species_this_step"]) for row in self.records)
-            ),
-            "total_active_interactions": int(
-                sum(int(row["active_interaction_count"]) for row in self.records)
-            ),
+            # Species registration happens on every detection step, whereas a
+            # row may only be sampled every ``metrics_every`` generations.
+            # The registry is therefore the authoritative cumulative count.
+            "total_new_species": int(len(registry)),
+            "total_active_interactions": int(self._total_active_interactions),
             "last_generation": int(
                 latest.get("generation", 0) if last_generation is None else last_generation
             ),

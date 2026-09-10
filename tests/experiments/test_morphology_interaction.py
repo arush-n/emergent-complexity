@@ -7,6 +7,7 @@ from emergent.core.step import step_jit
 from emergent.experiments.morphology_interactions.canonical import canonicalize_grid
 from emergent.experiments.morphology_interactions.components import Component
 from emergent.experiments.morphology_interactions.config import MorphologyExperimentConfig
+from emergent.experiments.morphology_interactions.encoding import morphology_statistics
 from emergent.experiments.morphology_interactions.engine import MorphologyInteractionEngine
 from emergent.experiments.morphology_interactions.interaction import (
     CHANNEL_COUNT,
@@ -17,6 +18,7 @@ from emergent.experiments.morphology_interactions.interaction import (
     scrambled_interaction,
 )
 from emergent.experiments.morphology_interactions.local_step import resolve_owner_map
+from emergent.experiments.morphology_interactions.sensitivity import single_cell_perturbations
 
 
 def test_interaction_is_byte_stable_and_symmetric() -> None:
@@ -75,6 +77,56 @@ def test_default_structured_landscape_reaches_local_rule_projection() -> None:
     assert np.count_nonzero(np.r_[pair.birth_mask, pair.survival_mask] != base_bits) <= 2
 
 
+def test_structured_and_scrambled_marginals_are_calibrated() -> None:
+    shapes = [
+        np.asarray([[1]], dtype=np.uint8),
+        np.asarray([[1, 1]], dtype=np.uint8),
+        np.asarray([[1, 0], [1, 1]], dtype=np.uint8),
+        np.ones((2, 2), dtype=np.uint8),
+        np.asarray([[1, 1, 1]], dtype=np.uint8),
+        np.asarray([[1, 0, 1]], dtype=np.uint8),
+        np.asarray([[1, 1, 0], [0, 1, 1]], dtype=np.uint8),
+        np.asarray([[0, 1, 0], [1, 1, 1]], dtype=np.uint8),
+        np.asarray([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8),
+        np.asarray([[1, 0, 0], [1, 1, 1], [0, 0, 1]], dtype=np.uint8),
+        np.asarray([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=np.uint8),
+        np.asarray([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8),
+    ]
+    structured = []
+    scrambled = []
+    for index, first in enumerate(shapes):
+        for second in shapes[index:]:
+            pair = interaction(first, second, seed=42, alpha=0.0)
+            structured.append(pair.structured_vector)
+            scrambled.append(pair.scrambled_vector)
+    structured_values = np.concatenate(structured)
+    scrambled_values = np.concatenate(scrambled)
+
+    assert abs(np.mean(np.abs(structured_values)) - np.mean(np.abs(scrambled_values))) < 0.05
+    assert (
+        abs(np.mean(np.abs(structured_values) >= 0.35) - np.mean(np.abs(scrambled_values) >= 0.35))
+        < 0.05
+    )
+
+
+def test_large_shape_statistics_remain_on_comparable_scales() -> None:
+    small = morphology_statistics(np.ones((1, 1), dtype=np.uint8))
+    large = morphology_statistics(np.ones((20, 10), dtype=np.uint8))
+
+    assert np.all(np.isfinite(large))
+    assert np.all(np.abs(large) <= 1.0)
+    assert 0.0 < small[0] < large[0] < 1.0
+
+
+def test_sensitivity_removal_never_returns_a_disconnected_union() -> None:
+    perturbations = single_cell_perturbations(np.asarray([[1, 1, 1]], dtype=np.uint8))
+    labels = {perturbation.label for perturbation in perturbations}
+
+    assert "remove:0,1" not in labels
+    assert "remove:0,0" in labels
+    assert sum(label.startswith("remove:") for label in labels) == 1
+
+
 def test_zone_dilation_wraps_and_overlaps_resolve_by_pair_identity() -> None:
     first = Component(np.asarray([[2, 0]], dtype=np.int64), 1)
     second = Component(np.asarray([[2, 7]], dtype=np.int64), 1)
@@ -111,8 +163,8 @@ def test_zone_dilation_wraps_and_overlaps_resolve_by_pair_identity() -> None:
 
 def test_active_rule_changes_are_confined_to_the_interaction_zone() -> None:
     grid = np.zeros((20, 20), dtype=np.uint8)
-    grid[8, 2] = 1
-    grid[8, 4] = 1
+    grid[7:9, 2:4] = 1
+    grid[7:9, 5:7] = 1
     config = {
         "width": 20,
         "height": 20,
