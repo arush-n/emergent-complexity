@@ -223,12 +223,17 @@ def run_worker(args: argparse.Namespace) -> None:
             "strategy_schedule": schedule_manifest(base_config, args.strategy_schedule),
             "rollout_horizon": None,
             "stop_condition": (
-                "exact_unchanged_grid_or_grid_recurrence_or_morphology_recurrence_or_full_state_recurrence"
+                "exact_unchanged_grid_or_grid_recurrence_or_full_state_recurrence_or_extinct"
+                + ("_or_morphology_recurrence" if args.evict_morphology_repeats else "")
             ),
             "terminal_outcome": "failure_and_deterministic_slot_refill",
             "unchanged_grid_eviction": "exact_grid_equality_between_consecutive_states",
             "grid_recurrence_eviction": "exact_grid_only_recurrence_fast_path",
-            "morphology_recurrence_eviction": "exact_canonical_shape_multiset_recurrence_fast_path",
+            "morphology_recurrence_eviction": (
+                "enabled_exact_canonical_shape_multiset_recurrence_fast_path"
+                if args.evict_morphology_repeats
+                else "observed_only; disabled by default so moving organisms can evolve"
+            ),
             "batch_size": args.batch_size,
             "worker_id": args.worker_id,
             "workers": args.workers,
@@ -604,8 +609,10 @@ def run_worker(args: argparse.Namespace) -> None:
                         )
                 period = cycles[slot].observe(state_bytes(engine, following[slot]))
                 grid_period = grid_cycles[slot].observe(grid_state_bytes(following[slot]))
-                morphology_period = morphology_cycles[slot].observe(
-                    morphology_state_bytes(counts)
+                morphology_period = (
+                    morphology_cycles[slot].observe(morphology_state_bytes(counts))
+                    if args.evict_morphology_repeats
+                    else None
                 )
                 unchanged = bool(unchanged_flags[slot])
                 if (
@@ -769,6 +776,14 @@ def parser() -> argparse.ArgumentParser:
         "--disable-interactions",
         action="store_true",
         help="run the native Conway control while retaining the same trace format",
+    )
+    result.add_argument(
+        "--evict-morphology-repeats",
+        action="store_true",
+        help=(
+            "optionally evict repeated canonical shape multisets; disabled by default "
+            "so translating/mutating worlds remain active"
+        ),
     )
     result.add_argument(
         "--max-ticks",

@@ -236,6 +236,7 @@ def test_search_evicts_exact_repeating_morphology_before_full_chemistry_state(tm
             "--strategy-schedule",
             "fixed",
             "--disable-interactions",
+            "--evict-morphology-repeats",
             "--component-backend",
             "python",
             "--max-ticks",
