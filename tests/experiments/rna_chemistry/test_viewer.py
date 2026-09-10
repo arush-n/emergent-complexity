@@ -85,3 +85,51 @@ def test_reader_decodes_bitpacked_trace(tmp_path):
     assert frames["height"] == 7
     assert frames["width"] == 9
     assert frames["frames"][0]["after"] == packed(grid[0, 0])
+
+
+def test_reader_prefers_current_live_snapshot_over_stale_trace(tmp_path):
+    (tmp_path / "launcher.json").write_text("{}")
+    worker = tmp_path / "worker_000"
+    worker.mkdir()
+    (worker / "manifest.json").write_text(json.dumps({"backend": "cpu", "config": {}}))
+
+    archived = np.zeros((1, 1, 6, 6), dtype=np.uint8)
+    archived[0, 0, 1:3, 1:3] = 1
+    rules = np.full(archived.shape, CONWAY, np.uint32)
+    np.savez_compressed(
+        worker / "trace_000000000000.npz",
+        before=archived,
+        after=archived,
+        rules=rules,
+        trials=np.array([[11]]),
+        ages=np.array([[40]]),
+    )
+
+    live = np.zeros((1, 6, 6), dtype=np.uint8)
+    live[0, 4, 5] = 1
+    np.savez_compressed(
+        worker / "live.npz",
+        grids_bits=pack_grids(live),
+        trials=np.array([12]),
+        ages=np.array([2]),
+        tick=np.int64(43),
+        height=np.int32(6),
+        width=np.int32(6),
+    )
+
+    reader = TraceReader(tmp_path)
+    world = reader.overview()["worlds"][0]
+    assert world["live"] is True
+    assert world["trial"] == 12
+    assert world["age"] == 2
+    assert world["tick"] == 43
+    assert world["grid"] == packed(live[0])
+    assert world["archive_trial"] == 11
+    assert world["archive_lag_ticks"] == 43
+    assert world["archive_matches_live"] is False
+
+    frames = reader.frames(0, 0)
+    assert frames["live_frame"]["trial"] == 12
+    assert frames["live_frame"]["tick"] == 43
+    assert frames["live_frame"]["after"] == packed(live[0])
+    assert frames["live_frame"]["trace_trial"] == 11

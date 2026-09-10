@@ -406,6 +406,10 @@ def run_worker(args: argparse.Namespace) -> None:
     # copies are made only for ragged morphology/chemistry preparation,
     # archival, and exact-cycle bookkeeping.
     current = jnp.asarray(np.stack(grids), dtype=jnp.uint8)
+    # The viewer needs the current slot contents, not just the last flushed
+    # trace chunk. Keep one compact host mirror for periodic live snapshots;
+    # the simulation state itself remains on JAX between steps.
+    live_grids = np.stack(grids).astype(np.uint8, copy=True)
     pending = []
     tick = 0
     completed = 0
@@ -438,6 +442,25 @@ def run_worker(args: argparse.Namespace) -> None:
             )
         temporary.replace(target)
         pending.clear()
+
+    def flush_live() -> None:
+        """Atomically publish the latest grid/trial state for the viewer."""
+
+        target = root / "live.npz"
+        temporary = target.with_suffix(".tmp")
+        with temporary.open("wb") as handle:
+            np.savez_compressed(
+                handle,
+                grids_bits=pack_grids(live_grids),
+                trials=np.asarray(trial_ids, dtype=np.int64),
+                ages=np.asarray([engine.generation for engine in engines], dtype=np.int64),
+                tick=np.int64(tick),
+                height=np.int32(args.size),
+                width=np.int32(args.size),
+            )
+        temporary.replace(target)
+
+    flush_live()
 
     def annotate_preparation(slot: int, prepared: PreparedFields, trace_tick: int) -> None:
         nonlocal interesting_shapes, interesting_interactions
@@ -506,6 +529,8 @@ def run_worker(args: argparse.Namespace) -> None:
             "interesting_shapes": interesting_shapes,
             "interesting_interactions": interesting_interactions,
             "active_sites_total": active_sites_total,
+            "live_tick": tick,
+            "live_snapshot": "live.npz",
             "elapsed_seconds": elapsed,
             "environment_steps_per_second": rate,
             "aggregate_environment_steps_per_second": rate,
@@ -529,6 +554,7 @@ def run_worker(args: argparse.Namespace) -> None:
             unchanged_device.block_until_ready()
             unchanged_flags = np.asarray(jax.device_get(unchanged_device), dtype=bool)
             following = np.asarray(jax.device_get(following_device), dtype=np.uint8)
+            live_grids = following.copy()
             pending.append(
                 (
                     list(trial_ids),
@@ -654,6 +680,7 @@ def run_worker(args: argparse.Namespace) -> None:
                         morphology_state_bytes(baselines[slot])
                     )
                     current = current.at[slot].set(jnp.asarray(replacement_grid, dtype=jnp.uint8))
+                    live_grids[slot] = replacement_grid
                 else:
                     cached_components[slot] = components_after[slot]
                 if len(engine.pair_cache) + len(engine.sequence_cache) > cache_limit:
@@ -668,6 +695,7 @@ def run_worker(args: argparse.Namespace) -> None:
                 flush()
             now = time.perf_counter()
             if now - last_status >= 5 or args.max_ticks == tick:
+                flush_live()
                 write_json(
                     root / "status.json",
                     status_payload(running=True, elapsed=now - started),
@@ -675,6 +703,7 @@ def run_worker(args: argparse.Namespace) -> None:
                 last_status = now
     finally:
         flush()
+        flush_live()
         events.write(
             json.dumps({"event": "interrupted", "ticks": tick, "active_trials": trial_ids}) + "\n"
         )

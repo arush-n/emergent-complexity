@@ -75,6 +75,9 @@ arguments, and one directory per worker. Each worker records:
   first-seen interesting shapes/interactions;
 - `status.json`: live throughput, ages, terminal failures, unique test keys, and
   chemistry activity;
+- `live.npz`: atomically replaced compact snapshot of the current grid, trial,
+  age, and tick for every active slot; this is what the live viewer uses for
+  current tiles;
 - `trace_*.npz`: every grid before/after every transition and its applied rule field;
   grids are little-endian bit-packed on disk to keep large-world archival practical;
 - `stopped.json`: present only after a graceful worker stop or failure cleanup.

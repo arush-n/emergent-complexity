@@ -48,6 +48,7 @@ class TraceReader:
             raise ValueError("run directory must contain launcher.json")
         self.lock = threading.RLock()
         self.cache: OrderedDict[Path, dict] = OrderedDict()
+        self.live_cache: dict[Path, tuple[int, dict]] = {}
         self.overview_cache = None
         self.overview_time = 0.0
         self.event_offsets = {}
@@ -76,6 +77,21 @@ class TraceReader:
                 self.cache.popitem(last=False)
         self.cache.move_to_end(path)
         return self.cache[path]
+
+    def load_live(self, worker: Path) -> dict | None:
+        """Load the atomically published current state for one worker."""
+
+        path = worker / "live.npz"
+        if not path.exists():
+            return None
+        stamp = path.stat().st_mtime_ns
+        cached = self.live_cache.get(path)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        with np.load(path, allow_pickle=False) as data:
+            value = {name: data[name] for name in data.files}
+        self.live_cache[path] = (stamp, value)
+        return value
 
     def read_events(self, worker: Path) -> None:
         path = worker / "events.jsonl"
@@ -139,36 +155,116 @@ class TraceReader:
                         }
                     )
                 traces = sorted(worker.glob("trace_*.npz"))
-                if not traces:
-                    continue
-                data = self.load(traces[-1])
-                before_chunk = trace_grids(data, "before")
-                after_chunk = trace_grids(data, "after")
-                before = before_chunk[-1]
-                after = after_chunk[-1]
-                rules = data["rules"][-1]
-                counterfactual = native_next(before)
-                for slot, grid in enumerate(after):
-                    worlds.append(
-                        {
-                            "worker": int(worker.name[-3:]),
-                            "slot": slot,
-                            "trial": int(data["trials"][-1, slot]),
-                            "strategy": self.trial_strategies.get(
-                                int(data["trials"][-1, slot]), "unknown"
-                            ),
-                            "age": int(data["ages"][-1, slot]) + 1,
-                            "tick": int(traces[-1].stem.split("_")[1]) + len(data["ages"]) - 1,
-                            "height": grid.shape[0],
-                            "width": grid.shape[1],
-                            "grid": packed(grid),
-                            "alive": int(grid.sum()),
-                            "changed": int(np.count_nonzero(grid != before[slot])),
-                            "rule_cells": int(np.count_nonzero(rules[slot] != CONWAY)),
-                            "effect_cells": int(np.count_nonzero(grid != counterfactual[slot])),
-                            "archive_lag_seconds": now - traces[-1].stat().st_mtime,
-                        }
+                live_path = worker / "live.npz"
+                live = self.load_live(worker)
+                archive_path = traces[-1] if traces else None
+                archive_trials = archive_ages = None
+                archive_tick = None
+                archive_lag = None if archive_path is None else now - archive_path.stat().st_mtime
+                if archive_path is not None:
+                    # When a live snapshot exists, read only trace metadata.
+                    # Decoding the large archived grids here made the viewer
+                    # both stale and unnecessarily memory hungry.
+                    with np.load(archive_path, allow_pickle=False) as data:
+                        archive_trials = np.asarray(data["trials"])
+                        archive_ages = np.asarray(data["ages"])
+                    archive_tick = int(archive_path.stem.split("_")[1]) + len(archive_ages) - 1
+
+                if live is not None:
+                    live_grids = unpack_grids(
+                        live["grids_bits"],
+                        height=int(np.asarray(live["height"]).item()),
+                        width=int(np.asarray(live["width"]).item()),
                     )
+                    live_trials = np.asarray(live["trials"], dtype=np.int64)
+                    live_ages = np.asarray(live["ages"], dtype=np.int64)
+                    live_tick = int(np.asarray(live["tick"]).item())
+                    live_height = int(np.asarray(live["height"]).item())
+                    live_width = int(np.asarray(live["width"]).item())
+                    live_lag = now - live_path.stat().st_mtime
+                    for slot, grid in enumerate(live_grids):
+                        trial = int(live_trials[slot])
+                        age = int(live_ages[slot])
+                        archive_trial = (
+                            None
+                            if archive_trials is None
+                            else int(archive_trials[-1, slot])
+                        )
+                        archive_age = (
+                            None
+                            if archive_ages is None
+                            else int(archive_ages[-1, slot]) + 1
+                        )
+                        archive_matches_live = (
+                            archive_tick == live_tick
+                            and archive_trial == trial
+                            and archive_age == age
+                        )
+                        worlds.append(
+                            {
+                                "worker": int(worker.name[-3:]),
+                                "slot": slot,
+                                "trial": trial,
+                                "strategy": self.trial_strategies.get(trial, "unknown"),
+                                "age": age,
+                                "tick": live_tick,
+                                "height": live_height,
+                                "width": live_width,
+                                "grid": packed(grid),
+                                "alive": int(grid.sum()),
+                                "changed": None,
+                                "rule_cells": None,
+                                "effect_cells": None,
+                                "live": True,
+                                "live_lag_seconds": live_lag,
+                                "archive_lag_seconds": archive_lag,
+                                "archive_lag_ticks": (
+                                    None
+                                    if archive_tick is None
+                                    else live_tick - archive_tick
+                                ),
+                                "archive_tick": archive_tick,
+                                "archive_trial": archive_trial,
+                                "archive_age": archive_age,
+                                "archive_matches_live": archive_matches_live,
+                            }
+                        )
+                elif archive_path is not None:
+                    data = self.load(archive_path)
+                    before_chunk = trace_grids(data, "before")
+                    after_chunk = trace_grids(data, "after")
+                    before = before_chunk[-1]
+                    after = after_chunk[-1]
+                    rules = data["rules"][-1]
+                    counterfactual = native_next(before)
+                    for slot, grid in enumerate(after):
+                        trial = int(data["trials"][-1, slot])
+                        age = int(data["ages"][-1, slot]) + 1
+                        worlds.append(
+                            {
+                                "worker": int(worker.name[-3:]),
+                                "slot": slot,
+                                "trial": trial,
+                                "strategy": self.trial_strategies.get(trial, "unknown"),
+                                "age": age,
+                                "tick": archive_tick,
+                                "height": grid.shape[0],
+                                "width": grid.shape[1],
+                                "grid": packed(grid),
+                                "alive": int(grid.sum()),
+                                "changed": int(np.count_nonzero(grid != before[slot])),
+                                "rule_cells": int(np.count_nonzero(rules[slot] != CONWAY)),
+                                "effect_cells": int(np.count_nonzero(grid != counterfactual[slot])),
+                                "live": False,
+                                "live_lag_seconds": None,
+                                "archive_lag_seconds": archive_lag,
+                                "archive_lag_ticks": 0,
+                                "archive_tick": archive_tick,
+                                "archive_trial": trial,
+                                "archive_age": age,
+                                "archive_matches_live": False,
+                            }
+                        )
             shapes = []
             for (height, width, code), count in self.lead_shapes.most_common(8):
                 cells = np.unpackbits(np.frombuffer(bytes.fromhex(code), np.uint8))[
@@ -197,6 +293,13 @@ class TraceReader:
                 "recent_interactions": self.recent_interactions[-20:],
                 "config": configs[0]["config"] if configs else {},
                 "backend": configs[0]["backend"] if configs else "unknown",
+                "live_snapshot_available": any(world["live"] for world in worlds),
+                "live_lag_seconds": max(
+                    (world["live_lag_seconds"] or 0 for world in worlds), default=0
+                ),
+                "archive_lag_seconds": max(
+                    (world["archive_lag_seconds"] or 0 for world in worlds), default=0
+                ),
                 "confirmed_replicators": None,
                 "verification": "Lineage verification not implemented; growth alerts are leads.",
             }
@@ -207,8 +310,43 @@ class TraceReader:
         with self.lock:
             worker = self.worker(worker_id)
             paths = sorted(worker.glob("trace_*.npz"))
+            live = self.load_live(worker)
+            live_frame = None
+            if live is not None:
+                live_grids = unpack_grids(
+                    live["grids_bits"],
+                    height=int(np.asarray(live["height"]).item()),
+                    width=int(np.asarray(live["width"]).item()),
+                )
+                if not 0 <= slot < live_grids.shape[0]:
+                    raise ValueError("unknown slot")
+                live_tick = int(np.asarray(live["tick"]).item())
+                live_trial = int(np.asarray(live["trials"])[slot])
+                live_age = int(np.asarray(live["ages"])[slot])
+                live_frame = {
+                    "tick": live_tick,
+                    "trial": live_trial,
+                    "age": live_age,
+                    "before": None,
+                    "after": packed(live_grids[slot]),
+                    "rules": None,
+                    "effect": None,
+                    "alive": int(live_grids[slot].sum()),
+                    "effect_cells": None,
+                    "live": True,
+                }
             if not paths:
-                raise ValueError("waiting for the first flushed trace")
+                if live_frame is None:
+                    raise ValueError("waiting for the first live snapshot or flushed trace")
+                return {
+                    "frames": [],
+                    "height": live_grids.shape[1],
+                    "width": live_grids.shape[2],
+                    "max_tick": live_frame["tick"],
+                    "worker": worker_id,
+                    "slot": slot,
+                    "live_frame": live_frame,
+                }
             starts = [int(path.stem.split("_")[1]) for path in paths]
             index = (
                 len(paths) - 1 if tick is None else max(0, bisect.bisect_right(starts, tick) - 1)
@@ -235,11 +373,18 @@ class TraceReader:
                 }
                 for i in range(len(after))
             ]
+            last_data = data if index == len(paths) - 1 else self.load(paths[-1])
+            max_tick = starts[-1] + len(last_data["ages"]) - 1
+            if live_frame is not None:
+                live_frame["trace_trial"] = int(data["trials"][-1, slot])
+                live_frame["trace_tick"] = max_tick
+                live_frame["archive_lag_ticks"] = live_frame["tick"] - max_tick
             return {
                 "frames": frames,
                 "height": after.shape[1],
                 "width": after.shape[2],
-                "max_tick": starts[-1] + len(self.load(paths[-1])["ages"]) - 1,
+                "max_tick": max_tick,
                 "worker": worker_id,
                 "slot": slot,
+                "live_frame": live_frame,
             }
