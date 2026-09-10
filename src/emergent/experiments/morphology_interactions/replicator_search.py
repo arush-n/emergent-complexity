@@ -565,6 +565,7 @@ def _trace_row(
     search_generation: int,
     candidate: Candidate,
     evaluation: ReplicatorEvaluation,
+    termination: RolloutTermination,
 ) -> TraceRow:
     """Serialize one candidate's best rollout evidence for ``trace.csv``."""
 
@@ -585,6 +586,9 @@ def _trace_row(
         "best_score": evaluation.best_score,
         "is_replicator": evaluation.is_replicator,
         "is_fission_like": evaluation.is_fission_like,
+        "rollout_terminal_generation": termination.generation,
+        "rollout_terminal_reason": termination.reason,
+        "rollout_cycle_period": -1 if termination.period is None else termination.period,
     }
 
 
@@ -747,7 +751,12 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
         terminal_reports.update(current_terminal_reports)
         unique_population = {candidate.key: candidate for candidate in population}
         trace.extend(
-            _trace_row(search_generation, candidate, current_evaluations[candidate.key])
+            _trace_row(
+                search_generation,
+                candidate,
+                current_evaluations[candidate.key],
+                current_terminal_reports[candidate.key],
+            )
             for candidate in sorted(
                 unique_population.values(),
                 key=lambda item: shape_key_sort_key(item.key),
@@ -804,6 +813,13 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
                 ),
                 "terminal_horizon": sum(
                     report.reason == "horizon" for report in current_terminal_reports.values()
+                ),
+                "rollout_transitions_executed": sum(
+                    report.generation for report in current_terminal_reports.values()
+                ),
+                "rollout_transitions_saved": sum(
+                    config.evaluation_steps - report.generation
+                    for report in current_terminal_reports.values()
                 ),
             }
         )
@@ -898,6 +914,12 @@ def write_search_artifacts(
         "terminal_rollouts": len(result.terminal_reports),
         "terminal_reason_counts": dict(
             sorted(Counter(report.reason for report in result.terminal_reports.values()).items())
+        ),
+        "rollout_transitions_executed": sum(
+            int(row["rollout_transitions_executed"]) for row in result.history
+        ),
+        "rollout_transitions_saved": sum(
+            int(row["rollout_transitions_saved"]) for row in result.history
         ),
         "best_pattern": matrix_to_text(result.best_candidate.matrix),
         "best_shape_key": _shape_key_json(result.best_candidate.key),

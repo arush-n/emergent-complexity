@@ -96,7 +96,10 @@ best_state.npz      exact world at the best evaluation generation
 `history.csv` is the compact progress trace for generation winners.
 `trace.csv` preserves the exact packed candidate identity and all scored
 copy/fission fields for every unique candidate evaluated in each evolutionary
-generation, so a large run can be audited without retaining every grid frame.
+generation, including its terminal generation/reason and cycle period, so a
+large run can be audited without retaining every grid frame. `history.csv`
+also records the number of rollout transitions executed and saved by terminal
+masking.
 
 `found=false` is an honest bounded-search result, not evidence that Conway's
 Game of Life has no self-replicators. Known engineered Life replicators are

@@ -250,6 +250,11 @@ least two exact copies of the candidate with little non-copy debris. It does
 not use morphology interactions, so a hit is attributable to the native
 `B3/S23` substrate.
 
+Each candidate environment terminates independently on extinction, a fixed
+point, a detected bounded cycle, or an exact-copy hit; other candidates in the
+same JAX batch continue. Terminal reasons and saved rollout transitions are
+included in `terminal.csv`, `history.csv`, and `trace.csv`.
+
 The result also reports `is_fission_like` for a promising lead whose later
 state contains repeated daughter components with a different key. That lead
 signal is never promoted to the stricter `found` flag.
