@@ -21,6 +21,14 @@ MOORE_OFFSETS: tuple[tuple[int, int], ...] = tuple(
 )
 SCIPY_DENSE_THRESHOLD = 0.20
 
+# Reused immutable connectivity stencils avoid allocating the same small
+# arrays on every SciPy detection pass.
+_SCIPY_STRUCTURE_2D = np.ones((3, 3), dtype=np.uint8)
+_SCIPY_STRUCTURE_2D.setflags(write=False)
+_SCIPY_STRUCTURE_3D = np.zeros((3, 3, 3), dtype=np.uint8)
+_SCIPY_STRUCTURE_3D[1, :, :] = 1
+_SCIPY_STRUCTURE_3D.setflags(write=False)
+
 
 @dataclass(frozen=True)
 class Component:
@@ -49,11 +57,12 @@ class Component:
         values = np.asarray(coordinates, dtype=np.int64)
         if values.ndim != 2 or values.shape[1] != 2 or values.shape[0] == 0:
             raise ValueError("component coordinates must be non-empty with shape (n, 2)")
-        ordered = values.copy()
-        ordered.setflags(write=False)
+        # The detector created this array solely for this component. Avoiding
+        # a second copy matters for sparse soups containing many components.
+        values.setflags(write=False)
         component = object.__new__(cls)
-        object.__setattr__(component, "coordinates", ordered)
-        object.__setattr__(component, "cell_count", int(ordered.shape[0]))
+        object.__setattr__(component, "coordinates", values)
+        object.__setattr__(component, "cell_count", int(values.shape[0]))
         return component
 
 
@@ -146,12 +155,47 @@ def _components_from_labels(
     if live_positions.size == 0:
         return []
     live_labels = flat_labels[live_positions]
-    order = np.argsort(live_labels, kind="stable")
-    sorted_labels = live_labels[order]
-    sorted_positions = live_positions[order]
-    group_starts = np.r_[0, np.flatnonzero(np.diff(sorted_labels)) + 1]
-    group_ends = np.r_[group_starts[1:], sorted_labels.size]
+
+    # Separate singleton cells before sorting the larger groups. Sparse soups
+    # commonly contain thousands of singletons; sorting every live label and
+    # allocating one coordinate array per singleton was a measurable host
+    # bottleneck. ``inverse`` lets us identify them in one C-backed pass while
+    # preserving the exact final scan-order sort below.
+    _, inverse, counts = np.unique(
+        live_labels,
+        return_inverse=True,
+        return_counts=True,
+    )
     components: list[Component] = []
+
+    if min_component_cells <= 1:
+        singleton_positions = live_positions[counts[inverse] == 1]
+        if singleton_positions.size:
+            singleton_coordinates = np.empty((singleton_positions.size, 2), dtype=np.int64)
+            singleton_coordinates[:, 0] = singleton_positions // width
+            singleton_coordinates[:, 1] = singleton_positions % width
+            for index in range(singleton_coordinates.shape[0]):
+                components.append(
+                    Component._from_sorted_coordinates(
+                        singleton_coordinates[index : index + 1]
+                    )
+                )
+
+    # Only the non-singleton cells need a label sort. This is substantially
+    # smaller than the full live-cell sort for fragmented random soups.
+    multi_mask = counts[inverse] > 1
+    multi_labels = live_labels[multi_mask]
+    multi_positions = live_positions[multi_mask]
+    if multi_labels.size:
+        order = np.argsort(multi_labels, kind="stable")
+        sorted_labels = multi_labels[order]
+        sorted_positions = multi_positions[order]
+        group_starts = np.r_[0, np.flatnonzero(np.diff(sorted_labels)) + 1]
+        group_ends = np.r_[group_starts[1:], sorted_labels.size]
+    else:
+        group_starts = np.empty(0, dtype=np.int64)
+        group_ends = np.empty(0, dtype=np.int64)
+
     for start, end in zip(group_starts, group_ends):
         if end - start < min_component_cells:
             continue
@@ -178,6 +222,46 @@ def _select_backend(live: np.ndarray, backend: str) -> str:
     return "scipy" if density >= SCIPY_DENSE_THRESHOLD else "python"
 
 
+def _periodic_label_pairs(live: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Return live label pairs touching the two toroidal seams.
+
+    Candidate generation is vectorized with NumPy rolls. The old code did up
+    to three Python modulo operations for every boundary cell, even when the
+    boundary was empty. Python is still used for the disjoint-set unions, but
+    only for actual candidate pairs.
+    """
+
+    pairs: list[np.ndarray] = []
+
+    top_live = live[0]
+    top_labels = labels[0]
+    bottom_live = live[-1]
+    bottom_labels = labels[-1]
+    for delta in (-1, 0, 1):
+        shifted_live = np.roll(bottom_live, -delta)
+        mask = top_live & shifted_live
+        if np.any(mask):
+            pairs.append(
+                np.column_stack((top_labels[mask], np.roll(bottom_labels, -delta)[mask]))
+            )
+
+    left_live = live[:, 0]
+    left_labels = labels[:, 0]
+    right_live = live[:, -1]
+    right_labels = labels[:, -1]
+    for delta in (-1, 0, 1):
+        shifted_live = np.roll(right_live, -delta)
+        mask = left_live & shifted_live
+        if np.any(mask):
+            pairs.append(
+                np.column_stack((left_labels[mask], np.roll(right_labels, -delta)[mask]))
+            )
+
+    if not pairs:
+        return np.empty((0, 2), dtype=np.int32)
+    return np.concatenate(pairs, axis=0).astype(np.int32, copy=False)
+
+
 def _detect_components_scipy(
     live: np.ndarray,
     *,
@@ -188,34 +272,22 @@ def _detect_components_scipy(
     if _ndimage is None:  # pragma: no cover - guarded by the dispatcher
         raise RuntimeError("SciPy is not available for the scipy component backend")
 
-    structure = np.ones((3, 3), dtype=np.uint8)
-    labels, label_count = _ndimage.label(live, structure=structure)
+    labels, label_count = _ndimage.label(live, structure=_SCIPY_STRUCTURE_2D)
     if label_count == 0:
         return []
 
     # ``ndimage.label`` handles the expensive interior flood fill in C.  A
     # component can still cross each periodic seam, so merge labels that are
     # Moore neighbors across the top/bottom and left/right boundaries.
+    periodic_pairs = _periodic_label_pairs(live, labels)
+    if not periodic_pairs.size:
+        return _components_from_labels(
+            labels,
+            min_component_cells=min_component_cells,
+        )
     parent = np.arange(label_count + 1, dtype=np.int32)
-    height, width = live.shape
-    for col in range(width):
-        for col_delta in (-1, 0, 1):
-            neighbor_col = (col + col_delta) % width
-            if live[0, col] and live[-1, neighbor_col]:
-                _union_labels(
-                    parent,
-                    int(labels[0, col]),
-                    int(labels[-1, neighbor_col]),
-                )
-    for row in range(height):
-        for row_delta in (-1, 0, 1):
-            neighbor_row = (row + row_delta) % height
-            if live[row, 0] and live[neighbor_row, -1]:
-                _union_labels(
-                    parent,
-                    int(labels[row, 0]),
-                    int(labels[neighbor_row, -1]),
-                )
+    for first, second in periodic_pairs:
+        _union_labels(parent, int(first), int(second))
 
     root_by_label = np.arange(label_count + 1, dtype=np.int32)
     for label in range(1, label_count + 1):
@@ -269,37 +341,35 @@ def detect_components_batch(
     # The first axis is intentionally isolated: only the middle slice has
     # neighbors in the batch dimension, while the two spatial axes use the
     # ordinary 8-connected Moore structure.
-    structure = np.zeros((3, 3, 3), dtype=np.uint8)
-    structure[1, :, :] = 1
-    labels, label_count = _ndimage.label(live, structure=structure)
+    labels, label_count = _ndimage.label(live, structure=_SCIPY_STRUCTURE_3D)
     if label_count == 0:
         return [[] for _ in range(values.shape[0])]
 
-    parent = np.arange(label_count + 1, dtype=np.int32)
-    batch_size, height, width = values.shape
-    boundary_labels: list[int] = []
+    batch_size = values.shape[0]
+    boundary_pairs: list[np.ndarray] = []
     for environment in range(batch_size):
-        for col in range(width):
-            for col_delta in (-1, 0, 1):
-                neighbor_col = (col + col_delta) % width
-                if live[environment, 0, col] and live[environment, -1, neighbor_col]:
-                    first = int(labels[environment, 0, col])
-                    second = int(labels[environment, -1, neighbor_col])
-                    boundary_labels.extend((first, second))
-                    _union_labels(parent, first, second)
-        for row in range(height):
-            for row_delta in (-1, 0, 1):
-                neighbor_row = (row + row_delta) % height
-                if live[environment, row, 0] and live[environment, neighbor_row, -1]:
-                    first = int(labels[environment, row, 0])
-                    second = int(labels[environment, neighbor_row, -1])
-                    boundary_labels.extend((first, second))
-                    _union_labels(parent, first, second)
+        pairs = _periodic_label_pairs(live[environment], labels[environment])
+        if pairs.size:
+            boundary_pairs.append(pairs)
 
+    if not boundary_pairs:
+        return [
+            _components_from_labels(
+                labels[environment],
+                min_component_cells=min_component_cells,
+            )
+            for environment in range(batch_size)
+        ]
+
+    parent = np.arange(label_count + 1, dtype=np.int32)
+    for pairs in boundary_pairs:
+        for first, second in pairs:
+            _union_labels(parent, int(first), int(second))
+
+    boundary_labels = [pairs.reshape(-1) for pairs in boundary_pairs]
     root_by_label = np.arange(label_count + 1, dtype=np.int32)
-    if boundary_labels:
-        for label in np.unique(np.asarray(boundary_labels, dtype=np.int32)):
-            root_by_label[label] = _find_root(parent, int(label))
+    for label in np.unique(np.concatenate(boundary_labels)):
+        root_by_label[label] = _find_root(parent, int(label))
     merged_labels = root_by_label[labels]
     return [
         _components_from_labels(

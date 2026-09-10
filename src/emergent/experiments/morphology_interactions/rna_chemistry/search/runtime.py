@@ -43,6 +43,14 @@ def step_fields(grids: jax.Array, rules: jax.Array) -> jax.Array:
     return ((rules >> channels) & 1).astype(jnp.uint8)
 
 
+# The continuous runner has already copied the previous grids to the host for
+# tracing and terminal checks, so it never needs the old device buffer after a
+# transition. Donation lets XLA reuse that buffer for the next state. Keep the
+# regular non-donating entry point above for replay/tests and callers that may
+# legitimately retain their input array.
+step_fields_donated = jax.jit(step_fields, donate_argnums=(0,))
+
+
 @jax.jit
 def unchanged_batch(before: jax.Array, after: jax.Array) -> jax.Array:
     """Return an exact no-change flag for every fixed-shape environment."""
@@ -158,7 +166,11 @@ def prepare_batch(
 
     if not engines:
         return []
-    values = np.asarray(jax.device_get(grids), dtype=np.uint8)
+    values = (
+        np.asarray(grids, dtype=np.uint8)
+        if isinstance(grids, np.ndarray)
+        else np.asarray(jax.device_get(grids), dtype=np.uint8)
+    )
     if values.ndim != 3 or len(engines) != values.shape[0]:
         raise ValueError("engines and grids must describe a matching (batch, height, width)")
     if components_by_environment is not None and len(components_by_environment) != len(engines):

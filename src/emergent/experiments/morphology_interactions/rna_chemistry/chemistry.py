@@ -14,11 +14,25 @@ from ..canonical import ShapeKey, shape_key_sort_key
 from ..encoding import deterministic_uniform
 from .accessibility import AccessibilityCache
 from .binding import BindingResult, BindingSite, KmerIndex, scan_binding_sites
-from .motifs import MOTIF_FEATURE_DIM, ReactionMotif, extract_reaction_motif, motif_feature_vector
+from .motifs import (
+    MOTIF_FEATURE_DIM,
+    ReactionMotif,
+    extract_reaction_motif,
+    motif_feature_vectors,
+)
 from .sequence import ChemicalSequence
 
 CHANNEL_COUNT = 18
 UINT64_SCALE = float(2**64)
+_BATCH_KERNEL_MIN_CAPACITY = 32
+
+
+def _batch_capacity(size: int) -> int:
+    """Return a stable power-of-two capacity for a positive batch size."""
+
+    if size < 1:
+        raise ValueError("batch size must be positive")
+    return max(_BATCH_KERNEL_MIN_CAPACITY, 1 << (size - 1).bit_length())
 
 
 @jax.jit
@@ -200,15 +214,7 @@ class ChemistryUniverse:
         values = np.asarray(features, dtype=np.float32)
         if values.shape != (self.feature_dim,):
             raise ValueError(f"features must have shape ({self.feature_dim},)")
-        result = np.asarray(
-            _structured_batch_kernel(
-                values[None, :],
-                self.weights,
-                self.calibration.structured_gain,
-                float(self.beta),
-            )[0],
-            dtype=np.float32,
-        )
+        result = np.asarray(self.structured_batch(values[None, :])[0], dtype=np.float32)
         result.setflags(write=False)
         return result
 
@@ -218,15 +224,20 @@ class ChemistryUniverse:
         values = np.asarray(features, dtype=np.float32)
         if values.ndim != 2 or values.shape[1] != self.feature_dim:
             raise ValueError(f"features must have shape (batch, {self.feature_dim})")
+        if values.shape[0] == 0:
+            return np.zeros((0, CHANNEL_COUNT), dtype=np.float32)
+        capacity = _batch_capacity(values.shape[0])
+        padded = np.zeros((capacity, self.feature_dim), dtype=np.float32)
+        padded[: values.shape[0]] = values
         return np.asarray(
             _structured_batch_kernel(
-                values,
+                padded,
                 self.weights,
                 self.calibration.structured_gain,
                 float(self.beta),
             ),
             dtype=np.float32,
-        )
+        )[: values.shape[0]]
 
     def scrambled_vector(self, motif: ReactionMotif) -> np.ndarray:
         """Return a symmetric BLAKE2b control vector for one exact motif pair."""
@@ -268,7 +279,17 @@ class ChemistryUniverse:
         second = np.asarray(scrambled, dtype=np.float32)
         if first.ndim != 2 or first.shape[1] != CHANNEL_COUNT or second.shape != first.shape:
             raise ValueError("batched site vectors must have shape (batch, 18)")
-        return np.asarray(_interpolate_kernel(first, second, float(alpha)), dtype=np.float32)
+        if first.shape[0] == 0:
+            return np.zeros((0, CHANNEL_COUNT), dtype=np.float32)
+        capacity = _batch_capacity(first.shape[0])
+        padded_first = np.zeros((capacity, CHANNEL_COUNT), dtype=np.float32)
+        padded_second = np.zeros((capacity, CHANNEL_COUNT), dtype=np.float32)
+        padded_first[: first.shape[0]] = first
+        padded_second[: first.shape[0]] = second
+        return np.asarray(
+            _interpolate_kernel(padded_first, padded_second, float(alpha)),
+            dtype=np.float32,
+        )[: first.shape[0]]
 
     def calibration_report(self) -> dict[str, int | float]:
         """Return the fixed-universe magnitude calibration."""
@@ -449,7 +470,7 @@ def evaluate_pair_chemistry(
         kmer_index_a=first_index,
         kmer_index_b=second_index,
     )
-    site_records: list[tuple[BindingSite, ReactionMotif, np.ndarray]] = []
+    site_records: list[tuple[BindingSite, ReactionMotif]] = []
     for site in scan.sites:
         if site.total_score > float(binding_energy_threshold):
             continue
@@ -461,13 +482,11 @@ def evaluate_pair_chemistry(
             accessibility_a=first_accessibility,
             accessibility_b=second_accessibility,
         )
-        features = motif_feature_vector(first.bases, second.bases, site, motif)
-        site_records.append((site, motif, features))
+        site_records.append((site, motif))
+    feature_rows = motif_feature_vectors(first.bases, second.bases, site_records)
     interactions: list[SiteInteraction] = []
     if site_records:
-        structured_vectors = universe.structured_batch(
-            np.asarray([record[2] for record in site_records], dtype=np.float32)
-        )
+        structured_vectors = universe.structured_batch(np.asarray(feature_rows, dtype=np.float32))
         scrambled_vectors = np.asarray(
             [universe.scrambled_vector(record[1]) for record in site_records],
             dtype=np.float32,
@@ -477,12 +496,12 @@ def evaluate_pair_chemistry(
         structured_vectors = np.zeros((0, CHANNEL_COUNT), dtype=np.float32)
         scrambled_vectors = np.zeros((0, CHANNEL_COUNT), dtype=np.float32)
         final_vectors = np.zeros((0, CHANNEL_COUNT), dtype=np.float32)
-    for index, (site, motif, features) in enumerate(site_records):
+    for index, (site, motif) in enumerate(site_records):
         interactions.append(
             SiteInteraction(
                 site=site,
                 motif=motif,
-                feature_vector=features,
+                feature_vector=feature_rows[index],
                 structured_vector=structured_vectors[index],
                 scrambled_vector=scrambled_vectors[index],
                 final_vector=final_vectors[index],

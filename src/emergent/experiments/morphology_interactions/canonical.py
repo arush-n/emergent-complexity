@@ -41,6 +41,9 @@ class ShapeKey:
         return self.packed.hex()
 
 
+SINGLETON_SHAPE_KEY = ShapeKey(1, 1, b"\x80")
+
+
 def shape_key_sort_key(key: ShapeKey) -> tuple[int, int, bytes]:
     """Return the canonical ordering token used for symmetric pairs."""
 

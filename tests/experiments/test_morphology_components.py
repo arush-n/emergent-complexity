@@ -72,3 +72,21 @@ def test_batched_scipy_detector_matches_reference_toroidal_detector() -> None:
         assert [component.coordinates.tolist() for component in actual_components] == [
             component.coordinates.tolist() for component in expected_components
         ]
+
+
+def test_vectorized_interacting_pairs_match_component_distance_reference() -> None:
+    rng = np.random.default_rng(456)
+    for height, width in ((1, 1), (2, 3), (5, 7), (9, 4)):
+        for radius in (0, 1, 2, 4):
+            for _ in range(12):
+                grid = (rng.random((height, width)) < 0.28).astype(np.uint8)
+                components = detect_components(grid, backend="python")
+                expected = {
+                    tuple(sorted((first, second)))
+                    for first in range(len(components))
+                    for second in range(first + 1, len(components))
+                    if component_pair_is_close(
+                        components[first], components[second], grid.shape, radius
+                    )
+                }
+                assert find_interacting_pairs(components, grid.shape, radius) == sorted(expected)

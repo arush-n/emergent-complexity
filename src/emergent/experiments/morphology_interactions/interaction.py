@@ -467,17 +467,38 @@ def find_interacting_pairs(
     for component_index, component in enumerate(components):
         owner[component.coordinates[:, 0], component.coordinates[:, 1]] = component_index
 
-    pairs: set[tuple[int, int]] = set()
-    for component_index, component in enumerate(components):
-        for row, col in component.coordinates:
-            for row_delta in range(-radius, radius + 1):
-                for col_delta in range(-radius, radius + 1):
-                    other_index = int(
-                        owner[(int(row) + row_delta) % height, (int(col) + col_delta) % width]
-                    )
-                    if other_index >= 0 and other_index != component_index:
-                        pairs.add(tuple(sorted((component_index, other_index))))
-    return sorted(pairs)
+    if len(components) < 2 or radius == 0:
+        return []
+
+    # The owner grid already turns each live cell into a component index.
+    # Compare it against each toroidally shifted copy in vectorized NumPy
+    # operations.  This keeps the exact Moore-distance semantics but removes
+    # the Python loop over every live cell and neighborhood offset.  Pair
+    # indices are packed into one integer so ``np.unique`` supplies the same
+    # deterministic de-duplication and ordering as the old set/sort path.
+    component_count = len(components)
+    encoded_pairs: list[np.ndarray] = []
+    # Only one half of the symmetric offset stencil is required: the
+    # unordered pair is found from the other endpoint for the omitted
+    # negative offsets. This halves the number of full-grid rolls without
+    # changing toroidal Chebyshev adjacency.
+    for row_delta in range(0, radius + 1):
+        for col_delta in range(-radius, radius + 1):
+            if row_delta == 0 and col_delta <= 0:
+                continue
+            shifted = np.roll(owner, shift=(row_delta, col_delta), axis=(0, 1))
+            valid = (owner >= 0) & (shifted >= 0) & (owner != shifted)
+            if not np.any(valid):
+                continue
+            first = owner[valid].astype(np.int64, copy=False)
+            second = shifted[valid].astype(np.int64, copy=False)
+            lower = np.minimum(first, second)
+            upper = np.maximum(first, second)
+            encoded_pairs.append(lower * component_count + upper)
+    if not encoded_pairs:
+        return []
+    unique = np.unique(np.concatenate(encoded_pairs))
+    return [(int(value // component_count), int(value % component_count)) for value in unique]
 
 
 def build_interaction_zone(

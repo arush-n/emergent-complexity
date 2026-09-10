@@ -94,3 +94,26 @@ def test_sparse_metric_sampling_keeps_unsampled_discoveries() -> None:
     assert len(result.generation_records) == 1
     assert result.summary["unique_species_total"] > 0
     assert result.summary["unique_chemical_sequences_total"] > 0
+
+
+def test_repeated_pair_lookups_reuse_cached_chemistry_and_count_encounters() -> None:
+    initial = np.zeros((16, 16), dtype=np.uint8)
+    initial[5:7, 3:5] = 1
+    initial[5:7, 6:8] = 1
+    config = RNAExperimentConfig(
+        width=16,
+        height=16,
+        warmup_steps=0,
+        interactions_enabled=True,
+        component_backend="python",
+        calibration_size=32,
+    )
+    engine = RNAChemistryEngine(config, initial_grid=initial)
+    _, observations, _ = engine._observe_current(initial)
+
+    first_pairs, _, _, _ = engine._prepare_interactions(observations)
+    second_pairs, _, _, _ = engine._prepare_interactions(observations)
+
+    assert len(first_pairs) == len(second_pairs) == 1
+    cached = next(iter(engine.pair_cache.values()))
+    assert cached.encounters == 2

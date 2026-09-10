@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,6 +17,16 @@ from .binding import BindingSite
 # fractions, length, two sequence entropies, and 256 one-hot features for each
 # of the two sorted four-base context motifs.
 MOTIF_FEATURE_DIM = 16 + 256 + 4 + 1 + 2 + 256 + 256
+_DEFAULT_KERNEL_BATCH_CAPACITY = 32
+_DEFAULT_KERNEL_LENGTH_CAPACITY = 32
+
+
+def _bucket_size(value: int) -> int:
+    """Return a power-of-two shape bucket for a positive segment length."""
+
+    if value < 1:
+        raise ValueError("bucketed dimensions must be positive")
+    return 1 << (value - 1).bit_length()
 
 
 @dataclass(frozen=True)
@@ -120,54 +131,77 @@ def extract_reaction_motif(
     )
 
 
-@jax.jit
-def _motif_features_jax(
+def _motif_features_kernel(
     segment_a: jax.Array,
     segment_b: jax.Array,
     motif_a: jax.Array,
     motif_b: jax.Array,
+    valid_length: jax.Array,
 ) -> jax.Array:
     """Construct a symmetric reaction feature vector on the accelerator."""
 
     first = jnp.asarray(segment_a, dtype=jnp.uint8)
     second = jnp.asarray(segment_b, dtype=jnp.uint8)
+    length = jnp.asarray(valid_length, dtype=jnp.int32)
+    valid = jnp.arange(first.size, dtype=jnp.int32) < length
     pair_codes = first * 4 + second
     reverse_pair_codes = second * 4 + first
-    pair_counts = jnp.bincount(pair_codes, length=16, minlength=16).astype(jnp.float32)
-    reverse_counts = jnp.bincount(
-        reverse_pair_codes,
+    pair_weights = valid.astype(jnp.float32)
+    pair_counts = jnp.bincount(
+        pair_codes,
+        weights=pair_weights,
         length=16,
         minlength=16,
     ).astype(jnp.float32)
-    pair_frequency = 0.5 * (pair_counts + reverse_counts) / jnp.maximum(first.size, 1)
+    reverse_counts = jnp.bincount(
+        reverse_pair_codes,
+        weights=pair_weights,
+        length=16,
+        minlength=16,
+    ).astype(jnp.float32)
+    pair_frequency = 0.5 * (pair_counts + reverse_counts) / jnp.maximum(length, 1)
 
     adjacent_codes = pair_codes[:-1] * 16 + pair_codes[1:]
     adjacent_reverse_codes = reverse_pair_codes[:-1] * 16 + reverse_pair_codes[1:]
+    adjacent_valid = valid[:-1] & valid[1:]
+    adjacent_weights = adjacent_valid.astype(jnp.float32)
     stack_counts = jnp.bincount(
         adjacent_codes,
+        weights=adjacent_weights,
         length=256,
         minlength=256,
     ).astype(jnp.float32)
     reverse_stack_counts = jnp.bincount(
         adjacent_reverse_codes,
+        weights=adjacent_weights,
         length=256,
         minlength=256,
     ).astype(jnp.float32)
-    stack_frequency = 0.5 * (stack_counts + reverse_stack_counts) / jnp.maximum(first.size - 1, 1)
+    stack_frequency = 0.5 * (stack_counts + reverse_stack_counts) / jnp.maximum(length - 1, 1)
 
     gc = ((first == 2) & (second == 1)) | ((first == 1) & (second == 2))
     au = ((first == 0) & (second == 3)) | ((first == 3) & (second == 0))
     gu = ((first == 2) & (second == 3)) | ((first == 3) & (second == 2))
     mismatch = ~(gc | au | gu)
     pair_fractions = jnp.asarray(
-        [jnp.mean(gc), jnp.mean(au), jnp.mean(gu), jnp.mean(mismatch)],
+        [
+            jnp.sum(gc & valid) / jnp.maximum(length, 1),
+            jnp.sum(au & valid) / jnp.maximum(length, 1),
+            jnp.sum(gu & valid) / jnp.maximum(length, 1),
+            jnp.sum(mismatch & valid) / jnp.maximum(length, 1),
+        ],
         dtype=jnp.float32,
     )
-    bounded_length = jnp.asarray(first.size, dtype=jnp.float32) / (first.size + 1.0)
+    bounded_length = length.astype(jnp.float32) / (length.astype(jnp.float32) + 1.0)
 
     def entropy(values: jax.Array) -> jax.Array:
-        counts = jnp.bincount(values, length=4, minlength=4).astype(jnp.float32)
-        probabilities = counts / jnp.maximum(values.size, 1)
+        counts = jnp.bincount(
+            values,
+            weights=pair_weights,
+            length=4,
+            minlength=4,
+        ).astype(jnp.float32)
+        probabilities = counts / jnp.maximum(length, 1)
         positive = jnp.where(probabilities > 0, probabilities, 1.0)
         return -jnp.sum(jnp.where(probabilities > 0, probabilities * jnp.log2(positive), 0.0)) / 2.0
 
@@ -192,6 +226,69 @@ def _motif_features_jax(
     )
 
 
+_motif_features_jax = jax.jit(_motif_features_kernel)
+_motif_features_batch_jax = jax.jit(
+    jax.vmap(_motif_features_kernel, in_axes=(0, 0, 0, 0, 0))
+)
+
+
+def motif_feature_vectors(
+    bases_a: Any,
+    bases_b: Any,
+    sites_and_motifs: Sequence[tuple[BindingSite, ReactionMotif]],
+) -> list[np.ndarray]:
+    """Build many site feature rows in a small number of padded JAX calls."""
+
+    first = validate_bases(bases_a)
+    second = validate_bases(bases_b)
+    if not sites_and_motifs:
+        return []
+
+    groups: dict[tuple[int, int], list[tuple[int, BindingSite, ReactionMotif]]] = {}
+    for index, (site, motif) in enumerate(sites_and_motifs):
+        first_segment = first[site.start_a : site.end_a]
+        second_segment = second[site.start_b : site.end_b][::-1]
+        if first_segment.size != site.length or second_segment.size != site.length:
+            raise ValueError("binding site slices do not match the declared length")
+        bucket_key = (
+            max(_DEFAULT_KERNEL_LENGTH_CAPACITY, _bucket_size(int(site.length))),
+            int(motif.motif_length),
+        )
+        groups.setdefault(bucket_key, []).append((index, site, motif))
+
+    results: list[np.ndarray | None] = [None] * len(sites_and_motifs)
+    for (length_bucket, motif_length), entries in groups.items():
+        batch_capacity = max(_DEFAULT_KERNEL_BATCH_CAPACITY, _bucket_size(len(entries)))
+        segments_a = np.zeros((batch_capacity, length_bucket), dtype=np.uint8)
+        segments_b = np.zeros((batch_capacity, length_bucket), dtype=np.uint8)
+        motifs_a = np.zeros((batch_capacity, motif_length), dtype=np.uint8)
+        motifs_b = np.zeros((batch_capacity, motif_length), dtype=np.uint8)
+        valid_lengths = np.zeros(batch_capacity, dtype=np.int32)
+        for row, (_, site, motif) in enumerate(entries):
+            segments_a[row, : site.length] = first[site.start_a : site.end_a]
+            segments_b[row, : site.length] = second[site.start_b : site.end_b][::-1]
+            motifs_a[row] = np.asarray(motif.bases_a, dtype=np.uint8)
+            motifs_b[row] = np.asarray(motif.bases_b, dtype=np.uint8)
+            valid_lengths[row] = site.length
+        values = np.asarray(
+            _motif_features_batch_jax(
+                jnp.asarray(segments_a),
+                jnp.asarray(segments_b),
+                jnp.asarray(motifs_a),
+                jnp.asarray(motifs_b),
+                jnp.asarray(valid_lengths),
+            ),
+            dtype=np.float32,
+        )
+        for row, (index, _, _) in enumerate(entries):
+            results[index] = values[row]
+
+    completed = [value for value in results if value is not None]
+    if len(completed) != len(results):
+        raise RuntimeError("motif feature batching lost a site")
+    return completed
+
+
 def motif_feature_vector(
     bases_a: Any,
     bases_b: Any,
@@ -200,22 +297,7 @@ def motif_feature_vector(
 ) -> np.ndarray:
     """Return the fixed ``MOTIF_FEATURE_DIM`` feature vector for one site."""
 
-    first = validate_bases(bases_a)[site.start_a : site.end_a]
-    second = validate_bases(bases_b)
-    # Site B is represented in the original sequence's ascending coordinates;
-    # the aligned segment therefore runs in reverse order.
-    second = second[site.start_b : site.end_b][::-1]
-    if first.size != site.length or second.size != site.length:
-        raise ValueError("binding site slices do not match the declared length")
-    result = np.asarray(
-        _motif_features_jax(
-            jnp.asarray(first),
-            jnp.asarray(second),
-            jnp.asarray(motif.bases_a, dtype=jnp.uint8),
-            jnp.asarray(motif.bases_b, dtype=jnp.uint8),
-        ),
-        dtype=np.float32,
-    )
+    result = motif_feature_vectors(bases_a, bases_b, ((site, motif),))[0]
     if result.shape != (MOTIF_FEATURE_DIM,):
         raise RuntimeError("motif feature kernel returned an unexpected feature dimension")
     return result

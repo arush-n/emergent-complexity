@@ -21,7 +21,13 @@ from ....core.rules import Rule, format_rule, rule_to_masks
 from ....core.step import step_jit
 from ....io.patterns import get_pattern
 from ....io.serialization import load_grid
-from ..canonical import ShapeKey, canonicalize_component, matrix_from_shape_key, shape_key_sort_key
+from ..canonical import (
+    SINGLETON_SHAPE_KEY,
+    ShapeKey,
+    canonicalize_component,
+    matrix_from_shape_key,
+    shape_key_sort_key,
+)
 from ..components import Component, detect_components
 from ..interaction import find_interacting_pairs
 from ..local_step import step_with_interactions
@@ -282,23 +288,56 @@ class RNAChemistryEngine:
 
         observations: list[tuple[Component, ShapeKey, ChemicalSequence]] = []
         new_species = 0
+        singleton_key = SINGLETON_SHAPE_KEY
+        singleton_sequence: ChemicalSequence | None = None
+        singleton_record: ChemicalSpeciesRecord | None = None
         for component in components:
-            key = self._canonical_key(component)
-            sequence = self.sequence_cache.get(key)
-            if sequence is None:
-                sequence = sequence_from_shape_key(key, mode=self.config.sequence_mode)
-                self.sequence_cache[key] = sequence
-            _, is_new = self.species_registry.observe(
-                key,
-                sequence,
-                generation=self.generation,
-            )
-            new_species += int(is_new)
+            if component.cell_count == 1:
+                key = singleton_key
+                if singleton_sequence is None:
+                    singleton_sequence = self.sequence_cache.get(key)
+                    if singleton_sequence is None:
+                        singleton_sequence = sequence_from_shape_key(
+                            key,
+                            mode=self.config.sequence_mode,
+                        )
+                        self.sequence_cache[key] = singleton_sequence
+                sequence = singleton_sequence
+                if singleton_record is None:
+                    singleton_record, is_new = self.species_registry.observe(
+                        key,
+                        sequence,
+                        generation=self.generation,
+                    )
+                    new_species += int(is_new)
+                else:
+                    singleton_record.observations += 1
+                    singleton_record.independent_components += 1
+                    singleton_record.last_seen_generation = self.generation
+            else:
+                key = self._canonical_key(component)
+                sequence = self.sequence_cache.get(key)
+                if sequence is None:
+                    sequence = sequence_from_shape_key(key, mode=self.config.sequence_mode)
+                    self.sequence_cache[key] = sequence
+                _, is_new = self.species_registry.observe(
+                    key,
+                    sequence,
+                    generation=self.generation,
+                )
+                new_species += int(is_new)
             observations.append((component, key, sequence))
         return components, observations, new_species
 
     def _canonical_key(self, component: Component) -> ShapeKey:
         """Return one exact key, reusing the translation-invariant host cache."""
+
+        # A singleton is invariant under every configured transform. This is
+        # the common case in a sparse random soup; bypassing normalization,
+        # cache-key allocation, and canonicalization avoids several temporary
+        # arrays per live cell while preserving the exact ShapeKey contract.
+        if component.cell_count == 1:
+            return SINGLETON_SHAPE_KEY
 
         shifted = component.coordinates - component.coordinates.min(axis=0)
         cache_key: tuple[tuple[int, int], bytes] | None = None
@@ -326,6 +365,14 @@ class RNAChemistryEngine:
     ) -> PairChemistry:
         first_key = first[1]
         second_key = second[1]
+        cache_key = tuple(sorted((first_key, second_key), key=shape_key_sort_key))
+        cached = self.pair_cache.get(cache_key)
+        if cached is not None:
+            # Avoid k-mer/accessibility lookups for the overwhelmingly common
+            # repeated encounter path.  ``cached_pair_chemistry`` performs the
+            # same encounter accounting after a cache miss.
+            cached.encounters += 1
+            return cached
         if shape_key_sort_key(first_key) <= shape_key_sort_key(second_key):
             sequence_a, sequence_b = first[2], second[2]
         else:

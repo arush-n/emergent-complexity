@@ -95,6 +95,22 @@ binding-site selection, and event serialization remain deterministic host-side
 bookkeeping. Batched component labeling and one batched JAX transition keep
 that unavoidable boundary narrow.
 
+## Throughput guidance
+
+Use `--component-backend scipy` for search workloads. The fixed-shape Life
+transition is already one JAX operation over each worker batch; the limiting
+stage is usually exact component extraction and chemistry preparation. On
+CPU, several moderate process shards generally outperform one very large
+batch because they parallelize that host-side work. A useful starting point
+is `--workers 4 --batch-size 8`, then measure on the target machine.
+
+`--detect-every 2` or greater reduces analysis overhead, but it is a declared
+physics parameter: interaction fields are refreshed less often. It should be
+compared as a separate condition, not treated as an invisible optimization.
+The manifest records the active JAX backend and devices. If the environment
+does not provide a Metal JAX plugin, JAX will report `cpu`; install and select
+that backend separately before attributing a speed change to GPU execution.
+
 ```bash
 .venv/bin/python -m emergent.experiments.morphology_interactions.rna_chemistry.search.replay \
   artifacts/experiments/morphology_interactions/rna_chemistry/search/continuous/worker_000

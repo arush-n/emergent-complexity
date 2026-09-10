@@ -5,13 +5,19 @@ import jax.numpy as jnp
 import numpy as np
 
 from emergent.experiments.morphology_interactions.canonical import canonicalize_grid
+from emergent.experiments.morphology_interactions.rna_chemistry.binding import scan_binding_sites
 from emergent.experiments.morphology_interactions.rna_chemistry.chemistry import (
     CHANNEL_COUNT,
     _structured_batch_kernel,
     evaluate_pair_chemistry,
     make_chemistry_universe,
 )
-from emergent.experiments.morphology_interactions.rna_chemistry.motifs import MOTIF_FEATURE_DIM
+from emergent.experiments.morphology_interactions.rna_chemistry.motifs import (
+    MOTIF_FEATURE_DIM,
+    extract_reaction_motif,
+    motif_feature_vector,
+    motif_feature_vectors,
+)
 from emergent.experiments.morphology_interactions.rna_chemistry.sequence import ChemicalSequence
 
 
@@ -61,6 +67,24 @@ def test_same_site_chemistry_is_byte_stable_and_symmetric() -> None:
     np.testing.assert_array_equal(forward.sites[0].final_vector, reverse.sites[0].final_vector)
     np.testing.assert_array_equal(forward.sites[0].final_vector, repeated.sites[0].final_vector)
     assert forward.sites[0].feature_vector.shape == (MOTIF_FEATURE_DIM,)
+
+
+def test_bucketed_motif_features_match_single_site_features() -> None:
+    first = np.asarray([0, 1, 2, 3, 0, 1, 2, 3, 0, 1], dtype=np.uint8)
+    second = first.copy()
+    scan = scan_binding_sites(first, second, seed_length=4, minimum_length=4)
+    entries = tuple(
+        (
+            site,
+            extract_reaction_motif(first, second, site, motif_length=4),
+        )
+        for site in scan.sites
+    )
+    batched = motif_feature_vectors(first, second, entries)
+    individual = [motif_feature_vector(first, second, site, motif) for site, motif in entries]
+    assert len(batched) == len(individual)
+    for actual, expected in zip(batched, individual):
+        np.testing.assert_array_equal(actual, expected)
 
 
 def test_energy_lifetime_is_deterministic_and_stronger_sites_last_longer() -> None:

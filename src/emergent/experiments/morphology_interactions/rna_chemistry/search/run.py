@@ -25,7 +25,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ...canonical import ShapeKey, canonicalize_component
+from ...canonical import SINGLETON_SHAPE_KEY, ShapeKey, canonicalize_component
 from ...components import Component, detect_components, detect_components_batch
 from ..chemistry import make_chemistry_universe
 from ..config import RNAExperimentConfig
@@ -38,8 +38,7 @@ from .runtime import (
     pack_grids,
     prepare_batch,
     state_bytes,
-    step_fields,
-    unchanged_batch,
+    step_fields_donated,
 )
 from .schedule import TrialPlan, plan_for_trial, schedule_manifest
 
@@ -80,17 +79,30 @@ def _component_keys(
     grid_shape: tuple[int, int],
     engine: RNAChemistryEngine | None = None,
 ) -> Counter[ShapeKey]:
-    return Counter(
-        engine._canonical_key(component)
-        if engine is not None
-        else canonicalize_component(
-            component,
-            grid_shape=grid_shape,
-            rotation_invariant=config.rotation_invariant,
-            reflection_invariant=config.reflection_invariant,
+    # Singleton cells dominate sparse soups and all share one exact key. Keep
+    # insertion order aligned with the detector by inserting that key at its
+    # first occurrence, while avoiding a cache lookup/canonical call per cell.
+    counts: Counter[ShapeKey] = Counter()
+    singleton_seen = False
+    for component in components:
+        if component.cell_count == 1:
+            if not singleton_seen:
+                counts[SINGLETON_SHAPE_KEY] = 0
+                singleton_seen = True
+            counts[SINGLETON_SHAPE_KEY] += 1
+            continue
+        key = (
+            engine._canonical_key(component)
+            if engine is not None
+            else canonicalize_component(
+                component,
+                grid_shape=grid_shape,
+                rotation_invariant=config.rotation_invariant,
+                reflection_invariant=config.reflection_invariant,
+            )
         )
-        for component in components
-    )
+        counts[key] += 1
+    return counts
 
 
 def shape_counts(grid: np.ndarray, config: RNAExperimentConfig) -> Counter[ShapeKey]:
@@ -286,6 +298,7 @@ def run_worker(args: argparse.Namespace) -> None:
     shared_sequences: dict[tuple[object, ...], dict] = {}
     shared_kmers: dict[tuple[object, ...], dict] = {}
     shared_accessibility: dict[tuple[object, ...], dict] = {}
+    shared_canonical: dict[tuple[object, ...], dict] = {}
     shared_pairs: dict[str, dict] = {}
 
     def write_event(payload: dict[str, object]) -> None:
@@ -354,15 +367,20 @@ def run_worker(args: argparse.Namespace) -> None:
             config.fold_window,
             config.allow_gu_wobble,
         )
+        canonical_pool_key = (
+            config.rotation_invariant,
+            config.reflection_invariant,
+        )
         engine.sequence_cache = shared_sequences.setdefault(sequence_pool_key, {})
         engine.kmer_index_cache = shared_kmers.setdefault(kmer_pool_key, {})
+        engine._canonical_cache = shared_canonical.setdefault(canonical_pool_key, {})
         engine.accessibility_cache.profiles = shared_accessibility.setdefault(
             accessibility_pool_key, {}
         )
         engine.pair_cache = shared_pairs.setdefault(plan.config_key, {})
         baseline: Counter[ShapeKey] = Counter()
         components: list[Component] | None = None
-        if bootstrap:
+        if bootstrap and (config.interactions_enabled or args.evict_morphology_repeats):
             baseline, components = shape_counts_and_components(grid, config, engine)
         write_event(
             {
@@ -400,9 +418,18 @@ def run_worker(args: argparse.Namespace) -> None:
         trial_ids.append(trial)
         plans.append(plan)
         cached_components.append(components)
-    initial_counts, initial_components = shape_counts_and_components_batch(
-        np.stack(grids), [engine.config for engine in engines], engines
-    )
+    if (
+        any(engine.config.interactions_enabled for engine in engines)
+        or args.evict_morphology_repeats
+    ):
+        initial_counts, initial_components = shape_counts_and_components_batch(
+            np.stack(grids), [engine.config for engine in engines], engines
+        )
+    else:
+        # A native Conway control has no chemistry or morphology telemetry to
+        # prepare. Avoid paying for ragged component extraction in that mode.
+        initial_counts = [Counter() for _ in engines]
+        initial_components = [[] for _ in engines]
     for slot in range(args.batch_size):
         baselines[slot] = initial_counts[slot]
         cached_components[slot] = initial_components[slot]
@@ -471,47 +498,50 @@ def run_worker(args: argparse.Namespace) -> None:
         nonlocal interesting_shapes, interesting_interactions
         engine = engines[slot]
         plan = plans[slot]
-        for key in prepared.shape_keys:
-            identity = (plan.config_key, key)
-            if identity in seen_shape_notes or interesting_shapes >= args.interesting_limit:
-                continue
-            seen_shape_notes.add(identity)
-            interesting_shapes += 1
-            write_event(
-                {
-                    "event": "interesting_shape",
-                    "outcome": "observation",
-                    "trial": plan.trial,
-                    "slot": slot,
-                    "trace_tick": trace_tick,
-                    "generation": engine.generation,
-                    "strategy_key": plan.strategy.key,
-                    "config_key": plan.config_key,
-                    "shape": _shape_payload(engine, key),
-                }
-            )
-        for chemistry in prepared.pair_chemistries:
-            identity = (plan.config_key, chemistry.pair_key)
-            if (
-                identity in seen_interaction_notes
-                or interesting_interactions >= args.interesting_limit
-            ):
-                continue
-            seen_interaction_notes.add(identity)
-            interesting_interactions += 1
-            write_event(
-                {
-                    "event": "interesting_interaction",
-                    "outcome": "observation",
-                    "trial": plan.trial,
-                    "slot": slot,
-                    "trace_tick": trace_tick,
-                    "generation": engine.generation,
-                    "strategy_key": plan.strategy.key,
-                    "config_key": plan.config_key,
-                    "interaction": _pair_payload(chemistry),
-                }
-            )
+        if interesting_shapes < args.interesting_limit:
+            for key in prepared.shape_keys:
+                identity = (plan.config_key, key)
+                if identity in seen_shape_notes:
+                    continue
+                seen_shape_notes.add(identity)
+                interesting_shapes += 1
+                write_event(
+                    {
+                        "event": "interesting_shape",
+                        "outcome": "observation",
+                        "trial": plan.trial,
+                        "slot": slot,
+                        "trace_tick": trace_tick,
+                        "generation": engine.generation,
+                        "strategy_key": plan.strategy.key,
+                        "config_key": plan.config_key,
+                        "shape": _shape_payload(engine, key),
+                    }
+                )
+                if interesting_shapes >= args.interesting_limit:
+                    break
+        if interesting_interactions < args.interesting_limit:
+            for chemistry in prepared.pair_chemistries:
+                identity = (plan.config_key, chemistry.pair_key)
+                if identity in seen_interaction_notes:
+                    continue
+                seen_interaction_notes.add(identity)
+                interesting_interactions += 1
+                write_event(
+                    {
+                        "event": "interesting_interaction",
+                        "outcome": "observation",
+                        "trial": plan.trial,
+                        "slot": slot,
+                        "trace_tick": trace_tick,
+                        "generation": engine.generation,
+                        "strategy_key": plan.strategy.key,
+                        "config_key": plan.config_key,
+                        "interaction": _pair_payload(chemistry),
+                    }
+                )
+                if interesting_interactions >= args.interesting_limit:
+                    break
 
     def status_payload(*, running: bool, elapsed: float) -> dict[str, object]:
         rate = tick * args.batch_size / elapsed if elapsed else 0.0
@@ -553,12 +583,15 @@ def run_worker(args: argparse.Namespace) -> None:
                 annotate_preparation(slot, details, tick)
             rules = np.stack([item.rules for item in prepared]).astype(np.uint32, copy=False)
             active_sites_total += sum(item.active_zone_count for item in prepared)
-            following_device = step_fields(current, jnp.asarray(rules, dtype=jnp.uint32))
-            following_device.block_until_ready()
-            unchanged_device = unchanged_batch(current, following_device)
-            unchanged_device.block_until_ready()
-            unchanged_flags = np.asarray(jax.device_get(unchanged_device), dtype=bool)
+            following_device = step_fields_donated(
+                current,
+                jnp.asarray(rules, dtype=jnp.uint32),
+            )
+            # The trace/archive already requires the complete next grid on the
+            # host. Derive the exact unchanged predicate from that copy instead
+            # of launching a second full-grid JAX comparison kernel.
             following = np.asarray(jax.device_get(following_device), dtype=np.uint8)
+            unchanged_flags = np.all(host_before == following, axis=(-2, -1))
             live_grids = following.copy()
             pending.append(
                 (
@@ -571,11 +604,39 @@ def run_worker(args: argparse.Namespace) -> None:
             )
             tick += 1
             current = following_device
-            counts_after, components_after = shape_counts_and_components_batch(
-                following,
-                [engine.config for engine in engines],
-                engines,
-            )
+            # Component extraction is needed after a transition only when it
+            # can feed the next chemistry pass or an explicitly requested
+            # morphology-cycle detector. With detect_every > 1 this removes
+            # host work on the intervening generations without changing the
+            # local-rule update schedule.
+            counts_after = [Counter() for _ in engines]
+            components_after: list[list[Component]] = [[] for _ in engines]
+            analysis_performed = [False] * len(engines)
+            analysis_slots: list[int] = []
+            for slot, engine in enumerate(engines):
+                next_generation = engine.generation + 1
+                chemistry_due = (
+                    engine.config.interactions_enabled
+                    and next_generation >= engine.config.warmup_steps
+                    and (next_generation - engine.config.warmup_steps)
+                    % engine.config.detect_every
+                    == 0
+                )
+                if chemistry_due or args.evict_morphology_repeats:
+                    analysis_slots.append(slot)
+            if analysis_slots:
+                detected_counts, detected_components = shape_counts_and_components_batch(
+                    following[analysis_slots],
+                    [engines[slot].config for slot in analysis_slots],
+                    [engines[slot] for slot in analysis_slots],
+                )
+                for local_index, slot in enumerate(analysis_slots):
+                    counts_after[slot] = detected_counts[local_index]
+                    components_after[slot] = detected_components[local_index]
+                    analysis_performed[slot] = True
+            for slot in range(len(engines)):
+                if not analysis_performed[slot]:
+                    cached_components[slot] = None
             for slot, engine in enumerate(engines):
                 engine.generation += 1
                 counts = counts_after[slot]
@@ -689,7 +750,9 @@ def run_worker(args: argparse.Namespace) -> None:
                     current = current.at[slot].set(jnp.asarray(replacement_grid, dtype=jnp.uint8))
                     live_grids[slot] = replacement_grid
                 else:
-                    cached_components[slot] = components_after[slot]
+                    cached_components[slot] = (
+                        components_after[slot] if analysis_performed[slot] else None
+                    )
                 if len(engine.pair_cache) + len(engine.sequence_cache) > cache_limit:
                     # Pure memoization may be discarded; bound sites retain their physics.
                     engine.pair_cache.clear()

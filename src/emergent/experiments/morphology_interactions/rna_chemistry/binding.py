@@ -22,6 +22,16 @@ PAIR_ENERGY: dict[tuple[int, int], float] = {
     (2, 3): -1.0,
     (3, 2): -1.0,
 }
+_DEFAULT_KERNEL_BATCH_CAPACITY = 32
+_DEFAULT_KERNEL_LENGTH_CAPACITY = 32
+
+
+def _bucket_size(value: int) -> int:
+    """Return a power-of-two shape bucket for a positive dynamic dimension."""
+
+    if value < 1:
+        raise ValueError("bucketed dimensions must be positive")
+    return 1 << (value - 1).bit_length()
 
 
 @dataclass(frozen=True)
@@ -426,11 +436,17 @@ def scan_binding_sites(
         return BindingResult((), len(candidates), 0)
 
     maximum_length = max(right_a - left_a for left_a, right_a, _, _ in extents)
-    segments_a = np.zeros((len(extents), maximum_length), dtype=np.uint8)
-    segments_b = np.zeros((len(extents), maximum_length), dtype=np.uint8)
-    valid = np.zeros((len(extents), maximum_length), dtype=bool)
-    segment_accessibility_a = np.ones((len(extents), maximum_length), dtype=np.float32)
-    segment_accessibility_b = np.ones((len(extents), maximum_length), dtype=np.float32)
+    # JAX specializes on array shapes. Padding both dimensions to stable
+    # power-of-two buckets prevents a new compilation for every pair-specific
+    # extent count and maximum alignment length. Padded rows/cells are masked
+    # and therefore do not participate in any score.
+    batch_capacity = max(_DEFAULT_KERNEL_BATCH_CAPACITY, _bucket_size(len(extents)))
+    length_capacity = max(_DEFAULT_KERNEL_LENGTH_CAPACITY, _bucket_size(maximum_length))
+    segments_a = np.zeros((batch_capacity, length_capacity), dtype=np.uint8)
+    segments_b = np.zeros((batch_capacity, length_capacity), dtype=np.uint8)
+    valid = np.zeros((batch_capacity, length_capacity), dtype=bool)
+    segment_accessibility_a = np.ones((batch_capacity, length_capacity), dtype=np.float32)
+    segment_accessibility_b = np.ones((batch_capacity, length_capacity), dtype=np.float32)
     for index, (left_a, right_a, left_b, right_b) in enumerate(extents):
         length = right_a - left_a
         segments_a[index, :length] = first[left_a:right_a]
@@ -440,7 +456,7 @@ def scan_binding_sites(
         segment_accessibility_b[index, :length] = second_accessibility[
             second.size - right_b : second.size - left_b
         ][::-1]
-    canonical_counts, wobble_counts, mismatch_counts, pair_scores, stack_scores, total_scores = (
+    scored = jax.device_get(
         _score_alignment_batch(
             segments_a,
             segments_b,
@@ -451,6 +467,14 @@ def scan_binding_sites(
             allow_gu_wobble,
         )
     )
+    (
+        canonical_counts,
+        wobble_counts,
+        mismatch_counts,
+        pair_scores,
+        stack_scores,
+        total_scores,
+    ) = (np.asarray(values) for values in scored)
     raw: dict[tuple[int, int, int, int], BindingSite] = {}
     for index, (left_a, right_a, left_b, right_b) in enumerate(extents):
         length = right_a - left_a
