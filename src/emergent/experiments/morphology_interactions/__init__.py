@@ -19,7 +19,13 @@ from .components import (
     find_connected_components,
 )
 from .config import MorphologyExperimentConfig
-from .encoding import MorphologyEncoder, encode_shape, make_encoder, morphology_statistics
+from .encoding import (
+    MorphologyEncoder,
+    encode_shape,
+    exact_identity_vector,
+    make_encoder,
+    morphology_statistics,
+)
 from .engine import Engine, ExperimentResult, MorphologyInteractionEngine, run_experiment
 from .interaction import (
     InteractionUniverse,
@@ -108,6 +114,7 @@ __all__ = [
     "detect_components",
     "detect_components_batch",
     "encode_shape",
+    "exact_identity_vector",
     "evaluate_candidate_state",
     "experimental_step",
     "find_interacting_pairs",

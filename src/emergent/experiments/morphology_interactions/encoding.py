@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .canonical import ShapeKey, matrix_from_shape_key
+from .canonical import ShapeKey, canonical_matrix_from_grid, matrix_from_shape_key
 
 UINT64_SCALE = float(2**64)
 MORPHOLOGY_STATISTICS = (
@@ -20,6 +20,30 @@ MORPHOLOGY_STATISTICS = (
     "horizontal_symmetry",
     "vertical_symmetry",
 )
+
+
+def exact_identity_vector(shape: ShapeKey | np.ndarray) -> np.ndarray:
+    """Return an injective, size-aware vector for a canonical morphology.
+
+    ``ShapeKey`` remains the dictionary/comparison identity used by the
+    experiment. This vector is an explicit representation for audits and
+    downstream analyses: it contains the canonical height, width, and every
+    canonical cell bit. Its length therefore grows with bounding-box area,
+    and two different canonical matrices cannot produce the same vector.
+
+    When an array is supplied it is canonicalized first, so translated and
+    rotation-equivalent inputs follow the default canonical identity rules.
+    """
+
+    if isinstance(shape, ShapeKey):
+        matrix = matrix_from_shape_key(shape)
+    else:
+        matrix = canonical_matrix_from_grid(np.asarray(shape))
+
+    height, width = matrix.shape
+    header = np.asarray([height, width], dtype=np.int64)
+    cells = np.asarray(matrix, dtype=np.int64).reshape(-1)
+    return np.concatenate((header, cells))
 
 
 def _seed_bytes(seed: int) -> bytes:
@@ -196,6 +220,35 @@ class MorphologyEncoder:
         if norm == 0.0:
             return np.zeros(self.identity_dim, dtype=np.float64)
         return (vector / norm).astype(np.float64, copy=False)
+
+    def encode_scaled(
+        self,
+        shape: ShapeKey | Any,
+        *,
+        exponent: float = 0.5,
+    ) -> np.ndarray:
+        """Return the encoding with an explicit morphology-size gain.
+
+        The ordinary ``encode`` path is unit-normalized so alpha sweeps can
+        compare interaction-landscape structure without silently changing
+        interaction magnitude. This opt-in view makes size explicit through
+        ``cell_count ** exponent``. The default square-root gain is the
+        natural scale for a sum of cell-level contributions.
+
+        This remains an interaction representation, not the exact species
+        identity; use :func:`exact_identity_vector` or ``ShapeKey`` for
+        identity guarantees.
+        """
+
+        if not np.isfinite(exponent) or exponent < 0.0:
+            raise ValueError("exponent must be finite and non-negative")
+
+        matrix = _as_canonical_matrix(shape)
+        cell_count = int(np.count_nonzero(matrix))
+        if cell_count <= 0:
+            raise ValueError("shape must contain at least one live cell")
+        scale = float(cell_count) ** float(exponent)
+        return (self.encode(matrix) * scale).astype(np.float64, copy=False)
 
 
 def make_encoder(universe_seed: int, identity_dim: int = 32) -> MorphologyEncoder:

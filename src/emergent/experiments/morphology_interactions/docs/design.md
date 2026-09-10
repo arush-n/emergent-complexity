@@ -77,6 +77,14 @@ rotations while retaining mirror chirality. Identity is not the lossy vector
 used by the interaction law. A reappearing key obtains the same species record
 and pair-cache entry.
 
+For identity audits, `exact_identity_vector()` is an injective,
+variable-length representation containing the canonical dimensions and all
+canonical bits; its length grows with bounding-box area. The encoder also
+exposes `encode_scaled()`, an explicit size-aware view whose norm scales as
+`cell_count ** exponent` (square-root scaling by default). Ordinary `encode()`
+remains unit-normalized for controlled alpha comparisons. Neither
+fixed-dimensional view replaces `ShapeKey` as the exact identity.
+
 V1 identity is instantaneous. A glider's phases can therefore be different
 species. When two components become Moore-adjacent they become one component;
 pair effects are consequently encounter effects around distinct nearby shapes,

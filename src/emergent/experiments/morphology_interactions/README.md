@@ -87,6 +87,14 @@ tracks first/last observation, recurrence, independent component count, and a
 cached encoding. Species have no permanent organism ID: reappearing
 morphology recovers the same `ShapeKey`.
 
+For audits and downstream analyses, `exact_identity_vector()` exposes an
+injective variable-length representation containing the canonical dimensions
+and every canonical cell bit. Its length grows with bounding-box area. The
+fixed-dimensional `MorphologyEncoder.encode_scaled()` view adds an explicit
+`cell_count ** exponent` magnitude (square-root scaling by default). The
+ordinary `encode()` path remains unit-normalized so the baseline alpha sweep
+does not silently confound landscape structure with interaction magnitude.
+
 ## Interaction landscape
 
 Each canonical shape also receives a fixed-dimensional encoding `z_A` with
