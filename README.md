@@ -11,9 +11,8 @@ Live demo: <https://arush-n.github.io/emergent-complexity/>
 
 ## Install
 
-Python 3.12 is the deployment baseline. Python 3.11 through 3.14 are accepted
-by the package metadata, with CI targeting 3.12 and 3.13. The local
-verification environment is Python 3.11.9.
+Python 3.11 or newer is supported; see `pyproject.toml` for the package's
+declared version range.
 
 ```bash
 python -m venv .venv
@@ -33,12 +32,9 @@ python -m pip install -c constraints.txt -e ".[dev,browser]"
 python -m playwright install chromium
 ```
 
-The tested CPU baseline recorded in `constraints.txt` is JAX 0.10.2,
-NumPy 2.4.6, FastAPI 0.141.1, and Uvicorn 0.52.4. The declared ranges in
-`pyproject.toml` allow newer compatible JAX releases without making the
-documented environment ambiguous. Installing an accelerator-specific JAX
-build later is optional; the code does not assume CUDA or any particular
-device.
+The pinned constraints file provides a reproducible installation. An
+accelerator-specific JAX build is optional; the code does not assume CUDA or
+any particular device.
 
 ## Run the simulator
 

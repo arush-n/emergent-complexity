@@ -13,19 +13,8 @@ large interaction space:
 The experiment is isolated under this package. It does not modify the normal
 simulator, frontend, server, or `emergent.core` behavior.
 
-The detailed design contract is in [docs/design.md](docs/design.md), and the
-performance protocol is in [docs/benchmarking.md](docs/benchmarking.md). The
-package also contains the scoped short probe at `benchmarks/short.py`.
-
-The package layout keeps the required implementation modules importable at
-the top level and groups only supporting material:
-
-```text
-morphology_interactions/
-  *.py                 implementation and stable CLI entry points
-  docs/                design contract and benchmark protocol
-  benchmarks/          short compile-aware performance probe
-```
+Detailed design, benchmarking, requirements, and search notes are available in
+the scoped [docs](docs/) directory.
 
 ## Model
 
@@ -135,42 +124,6 @@ Only components within `interaction_radius=2` interact. Their encounter mask
 is dilated by `effect_padding=1`. If zones overlap, the greatest mean absolute
 interaction strength wins; exact ties use lexicographic canonical pair order.
 
-## Configuration and initial conditions
-
-`MorphologyExperimentConfig` is an immutable, validated configuration. Its
-resolved value is written to every scalar-run manifest. Important defaults are:
-
-```text
-world                 128 x 128
-seed                  42
-density               0.10
-base_rule             B3/S23
-steps                 5000
-warmup_steps          100
-alpha                 0.5
-beta                  1.0
-interaction_radius    2
-effect_padding        1
-max_rule_changes      2
-interaction_threshold 0.35
-detect_every          1
-```
-
-Warmup runs native CGOL only. Set `warmup_steps=0` for controlled encounters.
-The scalar runner supports:
-
-- `random`: native deterministic JAX random grid;
-- `patterns`: repository patterns such as `block`, `blinker`, and `glider`;
-- `npz`: an exact saved grid; and
-- `api`: one-time import through the native HTTP session/render endpoints.
-
-The API adapter is not used in the hot loop.
-
-Version 1 intentionally uses instantaneous morphology identity. A glider's
-phases may therefore be different species keys. Temporal or spatiotemporal
-identity is a separate future experiment, not silently mixed into these
-results.
-
 ## Running the experiment
 
 Run one artifact-producing universe:
@@ -188,6 +141,9 @@ python -m emergent.experiments.morphology_interactions.run \
   --size 128 --steps 5000 --warmup-steps 100 \
   --seed 42 --disable-interactions
 ```
+
+Use `--warmup-steps 0` for controlled encounters. Initial states can be
+selected with `--initial-condition random|patterns|npz|api`.
 
 Sweep the four primary landscape conditions with the same grid per seed:
 
@@ -348,35 +304,6 @@ versions, the simulation is deterministic. The implementation never uses
 Python's randomized `hash()`, wall-clock state, or an unseeded random draw in
 the transition.
 
-## Measurements and scientific controls
-
-Each sampled generation records live cells/fraction, component count, total
-and new species, active interactions, total pairs and local rules, component
-size statistics, interaction strength, births, deaths, and changed cells.
-The key novelty rates are:
-
-```text
-d(new species)/dt
-d(new encountered pairs)/dt
-d(new local rules)/dt
-```
-
-The primary controls hold the initial grid, native rule, size, warmup, and
-duration fixed:
-
-```text
-control:    interactions disabled
-structured: alpha = 0.00
-mixed:      alpha = 0.50
-scrambled:  alpha = 1.00
-```
-
-The sensitivity command measures morphology distance
-`||z_A' - z_A||` against interaction distance
-`||v(A',B) - v(A,B)||` for valid single-cell additions/removals. The
-structured condition should generally retain more local correlation than the
-scrambled condition; that is an empirical hypothesis, not a guaranteed result.
-
 ## Testing
 
 Run all tests and static checks from the repository root:
@@ -388,73 +315,7 @@ ruff format --check src/emergent/experiments/morphology_interactions tests/exper
 python -m compileall -q src tests
 ```
 
-The experiment tests cover:
-
-- toroidal 8-connected components and batched detector equivalence;
-- translation, rotation, reflection, and exact packed identities;
-- deterministic structured/scrambled/interpolated interactions;
-- bounded local B/S projection and deterministic overlap ownership;
-- exact native CGOL compatibility when no zones are active;
-- species/pair reappearance and symmetric interactions;
-- structured/scrambled marginal calibration and bounded large-shape statistics;
-- connected single-cell sensitivity candidates and sparse-metrics accounting;
-- scalar-versus-batched replay parity; and
-- randomized complete-run determinism.
-
-## Version 1 requirement checklist
-
-This is the implementation checklist for the experiment specification. The
-repository root `experiment.md` is an ignored local note in this checkout;
-this package README is the version-controlled contract.
-
-- [x] Native `parse_rule`, `rule_to_masks`, `neighbor_count_jit`, and
-  `step_jit` are imported; normal CGOL is not duplicated.
-- [x] The standalone package and requested modules live under
-  `src/emergent/experiments/morphology_interactions/`.
-- [x] Tests live under `tests/experiments/` and generated data under
-  `artifacts/experiments/morphology_interactions/`.
-- [x] Toroidal 8-connected component detection is implemented.
-- [x] Exact translation-aware canonical shape identity is implemented, with
-  configurable rotation and reflection invariance.
-- [x] Reappearing morphology recovers the same species key and cached law.
-- [x] Fixed-dimensional universe-seeded morphology encodings are implemented.
-- [x] Structured, deterministic-scrambled, and alpha-interpolated pair laws
-  are implemented.
-- [x] Pair laws are bounded 18-channel vectors and small local B/S changes.
-- [x] Spatial encounter zones, toroidal distance, and deterministic overlap
-  resolution are implemented.
-- [x] One JAX local-rule transition is used per generation, with one batched
-  transition for parallel environments.
-- [x] Interactions-disabled execution matches native CGOL bit-for-bit.
-- [x] Species and pair interaction caches are implemented.
-- [x] Warmup and random/pattern/NPZ/API initial-condition modes are implemented.
-- [x] Reproducible manifest, summary, CSV, packed-key, and sparse-snapshot
-  artifacts are implemented.
-- [x] Novel species, pair, and local-rule rates are recorded.
-- [x] Alpha sweep and one-cell sensitivity runners are implemented.
-- [x] Scalar, local-step, deterministic replay, batched-parity, and lint gates
-  pass.
-- [x] Optional CPU host acceleration and batched JAX execution support
-  hundreds/thousands of environments without modifying the native simulator.
-- [x] Scoped design/performance documentation and a compile-aware short
-  benchmark probe are included.
-
-## Current verification snapshot
-
-On the development machine, the full suite passes with 103 tests. A final CPU
-scale check using 1,000 environments, 24×24 grids, 20 steps, batch size 250,
-shared universe seed 42, and metrics disabled completed at approximately
-3,500 active-interaction transitions/sec. The corresponding interaction-
-disabled native control completed at approximately 44,000 transitions/sec.
-
-The scoped short probe also measured 128 environments at 32×32 for 40 steps:
-about 1,698 active transitions/sec with 64-environment batches versus 41,432
-native-control transitions/sec. Explicit SciPy component labeling reached
-about 1,756 active transitions/sec, while four host workers reached about
-1,491, so serial host preparation remains the default. `detect_every=2` reached
-about 3,083 transitions/sec but is a different physical experiment.
-
-Metal support is environment-dependent. The repository's normal environment
-currently exposes only `cpu:0`; a compatible `jax-metal` trial previously
-matched CPU output bit-for-bit but was slower for this morphology-heavy
-workload because host analysis and device transfers dominated.
+The tests cover component topology, canonical identity, deterministic pair
+laws, local-rule stepping, native CGOL compatibility, replay, sensitivity,
+and parallel execution. The complete implementation checklist is in
+[docs/requirements.md](docs/requirements.md).

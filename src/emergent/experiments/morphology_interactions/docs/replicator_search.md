@@ -69,15 +69,6 @@ python -m emergent.experiments.morphology_interactions.replicator_search \
   --output-dir artifacts/experiments/morphology_interactions/replicator_search/seed42
 ```
 
-For development, use a smaller bounded probe:
-
-```bash
-python -m emergent.experiments.morphology_interactions.replicator_search \
-  --candidate-size 7 --world-size 32 --population-size 12 \
-  --elite-count 4 --generations 4 --evaluation-steps 12 \
-  --component-backend python
-```
-
 The result is printed as JSON. When `--output-dir` is provided, the directory
 contains:
 
@@ -101,33 +92,6 @@ Game of Life has no self-replicators. Known engineered Life replicators are
 much larger and more specialized than the compact candidate family searched
 by this first probe. Increase canvas size, rollout length, population, and
 search generations deliberately, recording each resolved configuration.
-
-## Observed short result
-
-One development probe used seed `42`, a 12-cell candidate canvas, 48
-candidates, 40 evolutionary generations, 64 native rollout generations, and
-the SciPy host detector. It evaluated 1,276 unique candidates in about 14
-seconds on the local CPU JAX environment. It found no strict self-replicator,
-but did find this useful fission-like lead:
-
-```text
-parent (9 cells):
-..#.#
-.#.#.
-###..
-.##..
-
-at generation 5: two separate 9-cell daughters, no debris
-daughter ShapeKey: height=3, width=5, packed_hex=26f6
-```
-
-The two daughter keys are identical to each other but different from the
-parent key, so the run reports `is_fission_like=true` and
-`is_replicator=false`. An independent component rescore reproduced the two
-9-cell daughters with repeat purity `1.0`, and five scalar native
-`step_jit` calls matched the saved state bit-for-bit. This is a promising lead
-for a lineage-aware follow-up, not a claim that the parent is already a
-self-replicator.
 
 ## Independent inspection
 

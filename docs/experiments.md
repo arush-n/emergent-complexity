@@ -29,7 +29,7 @@ python -m emergent.experiments.morphology_interactions.benchmarks.short \
 Use `--shared-universe-seed 42` when the environments should query one common
 fixed interaction law. See the experiment's
 [`docs/benchmarking.md`](../src/emergent/experiments/morphology_interactions/docs/benchmarking.md)
-for the current short-probe results and interpretation.
+for the benchmark protocol and result-recording format.
 
 Try the deterministic native-Conway self-replication search with:
 

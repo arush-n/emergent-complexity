@@ -85,34 +85,15 @@ experiment remains host-bound by component extraction and transfer overhead.
 Always compare end-to-end transitions/second, not only a standalone local-step
 kernel. Record `jax_backend` and `jax_devices` with any published benchmark.
 
-## Latest short probe
+## Recording results
 
-The development-machine probe used CPU JAX, 128 environments, 32×32 grids,
-40 transitions, five warmup generations, `alpha=0.5`, a shared universe seed
-of 42, `component_backend=auto`, `batch_size=64`, and zero host workers. JAX
-compilation was excluded from the timings:
+Record the resolved configuration, backend, devices, batch size, component
+backend, detection interval, and elapsed time with every benchmark. Compare
+native control and active morphology runs using the same initial batch. Report
+both environments per second and environment-generations per second.
 
-| case | transitions/second | final alive mean |
-| --- | ---: | ---: |
-| native control, batch 64 | 41,432 | 47.05 |
-| active morphology, batch 64 | 1,698 | 35.49 |
-| active morphology, batch 128 | 1,657 | 35.49 |
-| active, `detect_every=2` | 3,083 | 38.09 |
-| active, one environment | 2,136 | 38.00 |
-
-This makes the current bottleneck clear: host morphology analysis is much more
-expensive than the native JAX step. The `detect_every=2` gain is real for
-throughput but changes the model, so it is not an alpha-sweep optimization.
-The 64-environment split was slightly faster than one full batch on this CPU;
-that result should be remeasured on another device.
-
-Two additional same-workload probes were useful:
-
-- explicit `component_backend=scipy` reached about 1,756 active
-  transitions/second, a small improvement over `auto` for this workload;
-- `host_workers=4` reached about 1,491 active transitions/second, slower than
-  serial host preparation at about 1,698 transitions/second.
-
-The current default therefore remains `host_workers=0`, with `auto` as the
-portable detector choice. Explicit SciPy is a reasonable dense/sparse-machine
-benchmark variant, but must retain the detector-equivalence tests.
+The high-dimensional parallel scale probe additionally records global species,
+pair, and effective-rule diversity plus an exact/empirical encoding audit. Its
+artifacts are suitable for comparing interaction-vector dimensions and local
+rule-change caps across machines without embedding machine-specific results in
+the documentation.
