@@ -102,6 +102,11 @@ rather than simply changing how often thresholds are crossed.
 
 ## Outputs
 
+For continuous sampling across parallel environments, use the
+[continuous search runner](search/README.md). Worlds run until their complete
+dynamic state repeats, and finished slots are refilled. It archives every
+grid transition and applied local rule for deterministic replay.
+
 Runs write to:
 
 ```text
