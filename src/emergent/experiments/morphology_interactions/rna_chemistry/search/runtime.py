@@ -225,6 +225,13 @@ def state_bytes(engine: RNAChemistryEngine, grid: np.ndarray) -> bytes:
     return pickle.dumps((phase, np.packbits(grid).tobytes(), bound), protocol=5)
 
 
+def grid_state_bytes(grid: np.ndarray) -> bytes:
+    """Serialize only a fixed-shape grid for exact spatial recurrence checks."""
+
+    values = np.asarray(grid, dtype=np.uint8)
+    return np.packbits(np.ascontiguousarray(values).reshape(-1), bitorder="little").tobytes()
+
+
 @dataclass
 class ExactCycle:
     """Online Brent detection: exact equality, any period, one anchor in memory.

@@ -9,6 +9,7 @@ from emergent.experiments.morphology_interactions.rna_chemistry.search.replay im
 from emergent.experiments.morphology_interactions.rna_chemistry.search.run import parser, run_worker
 from emergent.experiments.morphology_interactions.rna_chemistry.search.runtime import (
     ExactCycle,
+    grid_state_bytes,
     pack_grids,
     prepare,
     prepare_batch,
@@ -133,6 +134,17 @@ def test_cycle_detection_handles_long_period_and_transient_exactly():
     assert detected == 17
 
 
+def test_grid_only_cycle_detection_catches_repeating_spatial_state():
+    state_a = np.zeros((4, 4), dtype=np.uint8)
+    state_a[1, 1] = 1
+    state_b = np.zeros((4, 4), dtype=np.uint8)
+    state_b[2, 2] = 1
+    cycle = ExactCycle(grid_state_bytes(state_a))
+    assert cycle.observe(grid_state_bytes(state_b)) is None
+    assert cycle.observe(grid_state_bytes(state_a)) is None
+    assert cycle.observe(grid_state_bytes(state_b)) == 2
+
+
 def test_warmup_and_detection_phase_are_part_of_terminal_identity():
     config = RNAExperimentConfig(
         width=8, height=8, warmup_steps=3, detect_every=2, calibration_size=32
@@ -187,6 +199,47 @@ def test_search_evicts_exactly_unchanged_grid_during_warmup(tmp_path):
     terminal = next(event for event in events if event["event"] == "terminal")
     assert terminal["reason"] == "unchanged"
     assert terminal["unchanged_grid"] is True
+    assert terminal["failure"] is True
+
+
+def test_search_evicts_exact_repeating_grid_before_full_chemistry_state(tmp_path):
+    args = parser().parse_args(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--worker-id",
+            "0",
+            "--workers",
+            "1",
+            "--batch-size",
+            "1",
+            "--size",
+            "8",
+            "--density",
+            "0.08",
+            "--seed",
+            "907",
+            "--warmup-steps",
+            "0",
+            "--strategy-schedule",
+            "fixed",
+            "--disable-interactions",
+            "--component-backend",
+            "python",
+            "--max-ticks",
+            "3",
+        ]
+    )
+    run_worker(args)
+    import json
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "worker_000" / "events.jsonl").read_text().splitlines()
+    ]
+    terminal = next(event for event in events if event["event"] == "terminal")
+    assert terminal["reason"] == "grid_repeat"
+    assert terminal["grid_period"] == 2
     assert terminal["failure"] is True
 
 

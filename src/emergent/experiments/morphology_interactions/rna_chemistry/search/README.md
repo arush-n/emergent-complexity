@@ -4,9 +4,9 @@ Use [RNA Observatory](viewer/README.md) to watch worlds, replay individual
 transitions, and inspect the exact local rules and their effects.
 
 This runner samples deterministic RNA chemistry worlds indefinitely. Each
-environment has **no generation horizon**. Once its complete dynamic state
-repeats, or an exact transition leaves its grid unchanged, its slot receives a
-fresh seeded world. Other environments continue
+environment has **no generation horizon**. Once its grid repeats, its complete
+dynamic state repeats, or an exact transition leaves its grid unchanged, its
+slot receives a fresh seeded world. Other environments continue
 at their existing ages. A finite toroidal world will eventually repeat under
 this deterministic chemistry, but the required time can be extremely long.
 
@@ -28,7 +28,7 @@ schedule gives each replacement a different deterministic strategy/configuration
 Every trial has a stable `trial_key`, resolved `config_key`, initial-state key,
 and composite test key. Duplicate `(configuration, initial state)` tests are
 skipped. Terminal worlds are recorded as failed trials (`failure: true`) with
-their exact reason (`extinct`, `stable`, `repeat`, or `unchanged`) and then
+their exact reason (`extinct`, `stable`, `repeat`, `grid_repeat`, or `unchanged`) and then
 replaced. The
 replacement `start` event points to the failed trial and records its new
 strategy/configuration. Universe seed and initial-grid seed are recorded
@@ -43,22 +43,24 @@ replication in isolation.
 
 ## Exact termination
 
-Online Brent cycle detection compares exact serialized states. It stores one
-anchor per environment and supports any period, without a hash-collision risk.
-Detection may occur later than the first recurrence. State includes the grid,
-warmup/detection phase, persistent binding sites, their remaining lifetimes,
-zones, rules, strengths, and tie ordering. A repeated grid alone is insufficient
-when chemistry retains bindings. The cycle detector's history has constant
-space; chemistry caches are periodically evicted without changing dynamics.
+The runner keeps two exact Brent detectors. A grid-only detector quickly evicts
+spatially repeating oscillators or movers, while a full-state detector compares
+the serialized grid, warmup/detection phase, persistent binding sites, remaining
+lifetimes, zones, rules, strengths, and tie ordering. Both support any period
+without a hash-collision risk, and each stores one anchor per environment. The
+grid-only event records its exact `grid_period`; full-state recurrence remains
+available when chemistry state matters. Chemistry caches are periodically
+evicted without changing dynamics.
 
-Unchanged grids, fixed points, extinction, and periodic worlds are recorded
-separately. An
+Unchanged grids, grid repeats, fixed points, extinction, and full-state periodic
+worlds are recorded separately. An
 `--max-ticks` option exists for benchmarks only: it interrupts the worker and
 does **not** classify remaining worlds as terminal. Normal runs omit it.
 
 Unchanged-grid eviction is exact: consecutive dense grid states are compared
 with a JAX predicate. There is no low-activity threshold or arbitrary
-stagnation window. A world that keeps changing without repeating remains active.
+stagnation window. A world that keeps changing without an exact grid recurrence
+remains active.
 
 ## Trace and evidence
 

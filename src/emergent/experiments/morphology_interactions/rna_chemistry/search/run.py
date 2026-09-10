@@ -33,6 +33,7 @@ from ..engine import RNAChemistryEngine
 from .runtime import (
     ExactCycle,
     PreparedFields,
+    grid_state_bytes,
     pack_grids,
     prepare_batch,
     state_bytes,
@@ -220,9 +221,12 @@ def run_worker(args: argparse.Namespace) -> None:
             "base_config": base_config.as_dict(),
             "strategy_schedule": schedule_manifest(base_config, args.strategy_schedule),
             "rollout_horizon": None,
-            "stop_condition": "exact_full_state_recurrence_or_unchanged_grid",
+            "stop_condition": (
+                "exact_unchanged_grid_or_grid_recurrence_or_full_state_recurrence"
+            ),
             "terminal_outcome": "failure_and_deterministic_slot_refill",
             "unchanged_grid_eviction": "exact_grid_equality_between_consecutive_states",
+            "grid_recurrence_eviction": "exact_grid_only_recurrence_fast_path",
             "batch_size": args.batch_size,
             "worker_id": args.worker_id,
             "workers": args.workers,
@@ -256,6 +260,7 @@ def run_worker(args: argparse.Namespace) -> None:
     engines: list[RNAChemistryEngine] = []
     grids: list[np.ndarray] = []
     cycles: list[ExactCycle] = []
+    grid_cycles: list[ExactCycle] = []
     baselines: list[Counter[ShapeKey]] = []
     milestones: list[dict[ShapeKey, int]] = []
     trial_ids: list[int] = []
@@ -367,6 +372,7 @@ def run_worker(args: argparse.Namespace) -> None:
             engine,
             grid,
             ExactCycle(state_bytes(engine, grid)),
+            ExactCycle(grid_state_bytes(grid)),
             baseline,
             {},
             plan.trial,
@@ -376,10 +382,11 @@ def run_worker(args: argparse.Namespace) -> None:
 
     for slot in range(args.batch_size):
         replacement = spawn(slot)
-        engine, grid, cycle, baseline, milestone, trial, plan, components = replacement
+        engine, grid, cycle, grid_cycle, baseline, milestone, trial, plan, components = replacement
         engines.append(engine)
         grids.append(grid)
         cycles.append(cycle)
+        grid_cycles.append(grid_cycle)
         baselines.append(baseline)
         milestones.append(milestone)
         trial_ids.append(trial)
@@ -399,6 +406,7 @@ def run_worker(args: argparse.Namespace) -> None:
     tick = 0
     completed = 0
     unchanged_evictions = 0
+    grid_repeat_evictions = 0
     copy_leads = 0
     active_sites_total = 0
     interesting_shapes = 0
@@ -481,6 +489,7 @@ def run_worker(args: argparse.Namespace) -> None:
             "terminal_failures": completed,
             "failed_trials": completed,
             "unchanged_evictions": unchanged_evictions,
+            "grid_repeat_evictions": grid_repeat_evictions,
             "started_trials": serial,
             "skipped_duplicate_starts": skipped_starts,
             "unique_trial_keys": len(seen_trial_keys),
@@ -562,15 +571,20 @@ def run_worker(args: argparse.Namespace) -> None:
                             + "\n"
                         )
                 period = cycles[slot].observe(state_bytes(engine, following[slot]))
+                grid_period = grid_cycles[slot].observe(grid_state_bytes(following[slot]))
                 unchanged = bool(unchanged_flags[slot])
-                if unchanged or period is not None:
+                if unchanged or grid_period is not None or period is not None:
                     reason = (
                         "unchanged"
                         if unchanged
                         else (
-                            "extinct"
-                            if not np.any(following[slot])
-                            else ("stable" if period == 1 else "repeat")
+                            "grid_repeat"
+                            if grid_period is not None
+                            else (
+                                "extinct"
+                                if not np.any(following[slot])
+                                else ("stable" if period == 1 else "repeat")
+                            )
                         )
                     )
                     write_event(
@@ -583,6 +597,7 @@ def run_worker(args: argparse.Namespace) -> None:
                             "trace_tick": tick - 1,
                             "generation": engine.generation,
                             "period": period,
+                            "grid_period": grid_period,
                             "reason": reason,
                             "unchanged_grid": unchanged,
                             "strategy_key": plans[slot].strategy.key,
@@ -595,6 +610,8 @@ def run_worker(args: argparse.Namespace) -> None:
                     completed += 1
                     if unchanged:
                         unchanged_evictions += 1
+                    if grid_period is not None:
+                        grid_repeat_evictions += 1
                     replacement = spawn(
                         slot,
                         previous_plan=plans[slot],
@@ -605,6 +622,7 @@ def run_worker(args: argparse.Namespace) -> None:
                         engines[slot],
                         replacement_grid,
                         cycles[slot],
+                        grid_cycles[slot],
                         baselines[slot],
                         milestones[slot],
                         trial_ids[slot],
@@ -648,6 +666,7 @@ def run_worker(args: argparse.Namespace) -> None:
                 "completed_trials": completed,
                 "terminal_failures": completed,
                 "unchanged_evictions": unchanged_evictions,
+                "grid_repeat_evictions": grid_repeat_evictions,
                 "started_trials": serial,
                 "skipped_duplicate_starts": skipped_starts,
                 "reason": "error" if sys.exc_info()[0] else "operator_or_test_limit",
