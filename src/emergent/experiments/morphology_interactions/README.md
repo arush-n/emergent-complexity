@@ -13,6 +13,20 @@ large interaction space:
 The experiment is isolated under this package. It does not modify the normal
 simulator, frontend, server, or `emergent.core` behavior.
 
+The detailed design contract is in [docs/design.md](docs/design.md), and the
+performance protocol is in [docs/benchmarking.md](docs/benchmarking.md). The
+package also contains the scoped short probe at `benchmarks/short.py`.
+
+The package layout keeps the required implementation modules importable at
+the top level and groups only supporting material:
+
+```text
+morphology_interactions/
+  *.py                 implementation and stable CLI entry points
+  docs/                design contract and benchmark protocol
+  benchmarks/          short compile-aware performance probe
+```
+
 ## Model
 
 The physical state is a binary toroidal grid `X_t`. The default transition is
@@ -183,6 +197,15 @@ python -m emergent.experiments.morphology_interactions.sensitivity \
   --alphas 0,0.25,0.5,0.75,1
 ```
 
+Run the short compile-aware performance probe:
+
+```bash
+python -m emergent.experiments.morphology_interactions.benchmarks.short \
+  --num-envs 128 --size 32 --steps 40 --warmup-steps 5 \
+  --batch-size 64 \
+  --output-dir artifacts/experiments/morphology_interactions/benchmarks/short_cpu
+```
+
 ## Parallel environments
 
 `parallel.py` runs independent environments in lockstep. It keeps each
@@ -349,6 +372,8 @@ this package README is the version-controlled contract.
   pass.
 - [x] Optional CPU host acceleration and batched JAX execution support
   hundreds/thousands of environments without modifying the native simulator.
+- [x] Scoped design/performance documentation and a compile-aware short
+  benchmark probe are included.
 
 ## Current verification snapshot
 
@@ -357,6 +382,13 @@ scale check using 1,000 environments, 24×24 grids, 20 steps, batch size 250,
 shared universe seed 42, and metrics disabled completed at approximately
 3,500 active-interaction transitions/sec. The corresponding interaction-
 disabled native control completed at approximately 44,000 transitions/sec.
+
+The scoped short probe also measured 128 environments at 32×32 for 40 steps:
+about 1,698 active transitions/sec with 64-environment batches versus 41,432
+native-control transitions/sec. Explicit SciPy component labeling reached
+about 1,756 active transitions/sec, while four host workers reached about
+1,491, so serial host preparation remains the default. `detect_every=2` reached
+about 3,083 transitions/sec but is a different physical experiment.
 
 Metal support is environment-dependent. The repository's normal environment
 currently exposes only `cpu:0`; a compatible `jax-metal` trial previously

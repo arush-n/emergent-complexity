@@ -143,7 +143,7 @@ python -m emergent.experiments.compare_dimensions \
 ```text
 src/emergent/core/        pure JAX 2D grids, rules, transitions, scans, PRNG, measurements
 src/emergent/core3d/      pure JAX 3D grids, 26-neighbor rules, scans, batching, PRNG
-src/emergent/experiments/ small sampling, raw rule sweeps, and dimension comparisons
+src/emergent/experiments/ small sampling, raw rule sweeps, dimension comparisons, and the isolated morphology-interactions experiment
 src/emergent/io/          2D/3D patterns plus JSON/NPY/NPZ persistence
 src/emergent/server/      FastAPI assembly, dimension-specific routers, and sessions
 frontend/                 static HTML/CSS/JS UI, SVG diagnostics, Canvas, and WebGL voxel view
@@ -154,7 +154,10 @@ benchmarks/               engine and server/browser pipeline benchmarks
 ```
 
 More focused notes live in [`docs/`](docs/): architecture, rules, experiments,
-benchmarks, frontend behavior, deployment, and reproducibility.
+benchmarks, frontend behavior, deployment, and reproducibility. The detailed
+morphology-interactions design and benchmark notes remain next to that
+experiment under
+[`src/emergent/experiments/morphology_interactions/docs/`](src/emergent/experiments/morphology_interactions/docs/).
 
 For new code, use `emergent.core` for the 2D API and `emergent.core3d` for the
 3D API. The `emergent.rules`, `emergent.random`, `emergent.simulate`,
