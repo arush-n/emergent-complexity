@@ -43,6 +43,16 @@ def step_fields(grids: jax.Array, rules: jax.Array) -> jax.Array:
     return ((rules >> channels) & 1).astype(jnp.uint8)
 
 
+@jax.jit
+def unchanged_batch(before: jax.Array, after: jax.Array) -> jax.Array:
+    """Return an exact no-change flag for every fixed-shape environment."""
+
+    return jnp.all(
+        jnp.asarray(before, dtype=jnp.uint8) == jnp.asarray(after, dtype=jnp.uint8),
+        axis=(-2, -1),
+    )
+
+
 def rule_code(birth: np.ndarray, survival: np.ndarray) -> int:
     return sum(int(bit) << i for i, bit in enumerate(np.r_[birth, survival]))
 

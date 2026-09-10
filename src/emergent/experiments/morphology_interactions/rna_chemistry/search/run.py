@@ -30,7 +30,15 @@ from ...components import Component, detect_components, detect_components_batch
 from ..chemistry import make_chemistry_universe
 from ..config import RNAExperimentConfig
 from ..engine import RNAChemistryEngine
-from .runtime import ExactCycle, PreparedFields, pack_grids, prepare_batch, state_bytes, step_fields
+from .runtime import (
+    ExactCycle,
+    PreparedFields,
+    pack_grids,
+    prepare_batch,
+    state_bytes,
+    step_fields,
+    unchanged_batch,
+)
 from .schedule import TrialPlan, plan_for_trial, schedule_manifest
 
 
@@ -212,8 +220,9 @@ def run_worker(args: argparse.Namespace) -> None:
             "base_config": base_config.as_dict(),
             "strategy_schedule": schedule_manifest(base_config, args.strategy_schedule),
             "rollout_horizon": None,
-            "stop_condition": "exact_full_state_recurrence",
+            "stop_condition": "exact_full_state_recurrence_or_unchanged_grid",
             "terminal_outcome": "failure_and_deterministic_slot_refill",
+            "unchanged_grid_eviction": "exact_grid_equality_between_consecutive_states",
             "batch_size": args.batch_size,
             "worker_id": args.worker_id,
             "workers": args.workers,
@@ -389,6 +398,7 @@ def run_worker(args: argparse.Namespace) -> None:
     pending = []
     tick = 0
     completed = 0
+    unchanged_evictions = 0
     copy_leads = 0
     active_sites_total = 0
     interesting_shapes = 0
@@ -470,6 +480,7 @@ def run_worker(args: argparse.Namespace) -> None:
             "completed_trials": completed,
             "terminal_failures": completed,
             "failed_trials": completed,
+            "unchanged_evictions": unchanged_evictions,
             "started_trials": serial,
             "skipped_duplicate_starts": skipped_starts,
             "unique_trial_keys": len(seen_trial_keys),
@@ -499,6 +510,9 @@ def run_worker(args: argparse.Namespace) -> None:
             active_sites_total += sum(item.active_zone_count for item in prepared)
             following_device = step_fields(current, jnp.asarray(rules, dtype=jnp.uint32))
             following_device.block_until_ready()
+            unchanged_device = unchanged_batch(current, following_device)
+            unchanged_device.block_until_ready()
+            unchanged_flags = np.asarray(jax.device_get(unchanged_device), dtype=bool)
             following = np.asarray(jax.device_get(following_device), dtype=np.uint8)
             pending.append(
                 (
@@ -548,11 +562,16 @@ def run_worker(args: argparse.Namespace) -> None:
                             + "\n"
                         )
                 period = cycles[slot].observe(state_bytes(engine, following[slot]))
-                if period is not None:
+                unchanged = bool(unchanged_flags[slot])
+                if unchanged or period is not None:
                     reason = (
-                        "extinct"
-                        if not np.any(following[slot])
-                        else ("stable" if period == 1 else "repeat")
+                        "unchanged"
+                        if unchanged
+                        else (
+                            "extinct"
+                            if not np.any(following[slot])
+                            else ("stable" if period == 1 else "repeat")
+                        )
                     )
                     write_event(
                         {
@@ -565,6 +584,7 @@ def run_worker(args: argparse.Namespace) -> None:
                             "generation": engine.generation,
                             "period": period,
                             "reason": reason,
+                            "unchanged_grid": unchanged,
                             "strategy_key": plans[slot].strategy.key,
                             "config_key": plans[slot].config_key,
                             "trial_key": plans[slot].trial_key,
@@ -573,6 +593,8 @@ def run_worker(args: argparse.Namespace) -> None:
                         }
                     )
                     completed += 1
+                    if unchanged:
+                        unchanged_evictions += 1
                     replacement = spawn(
                         slot,
                         previous_plan=plans[slot],
@@ -625,6 +647,7 @@ def run_worker(args: argparse.Namespace) -> None:
                 "ticks": tick,
                 "completed_trials": completed,
                 "terminal_failures": completed,
+                "unchanged_evictions": unchanged_evictions,
                 "started_trials": serial,
                 "skipped_duplicate_starts": skipped_starts,
                 "reason": "error" if sys.exc_info()[0] else "operator_or_test_limit",

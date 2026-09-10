@@ -15,6 +15,7 @@ from emergent.experiments.morphology_interactions.rna_chemistry.search.runtime i
     rule_code,
     state_bytes,
     step_fields,
+    unchanged_batch,
     unpack_grids,
 )
 from emergent.experiments.morphology_interactions.rna_chemistry.search.schedule import (
@@ -34,6 +35,14 @@ def test_trace_grid_bitpacking_is_exact():
     encoded = pack_grids(grids)
     assert encoded.nbytes < grids.nbytes
     np.testing.assert_array_equal(unpack_grids(encoded, height=7, width=9), grids)
+
+
+def test_unchanged_batch_is_an_exact_jax_predicate():
+    before = np.zeros((3, 5, 5), dtype=np.uint8)
+    after = before.copy()
+    after[1, 2, 2] = 1
+    after[2, 0, 0] = 1
+    np.testing.assert_array_equal(unchanged_batch(before, after), [True, False, False])
 
 
 @pytest.mark.parametrize("lifetime", ["instant", "energy"])
@@ -139,6 +148,46 @@ def test_warmup_and_detection_phase_are_part_of_terminal_identity():
     assert state_bytes(engine, grid) != initial
     engine.generation = 5
     assert state_bytes(engine, grid) == initial
+
+
+def test_search_evicts_exactly_unchanged_grid_during_warmup(tmp_path):
+    args = parser().parse_args(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--worker-id",
+            "0",
+            "--workers",
+            "1",
+            "--batch-size",
+            "1",
+            "--size",
+            "8",
+            "--seed",
+            "0",
+            "--density",
+            "0",
+            "--warmup-steps",
+            "3",
+            "--max-ticks",
+            "1",
+            "--strategy-schedule",
+            "rotating",
+            "--component-backend",
+            "python",
+        ]
+    )
+    run_worker(args)
+    import json
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "worker_000" / "events.jsonl").read_text().splitlines()
+    ]
+    terminal = next(event for event in events if event["event"] == "terminal")
+    assert terminal["reason"] == "unchanged"
+    assert terminal["unchanged_grid"] is True
+    assert terminal["failure"] is True
 
 
 def test_refilled_search_trace_replays_chemistry_and_every_transition(tmp_path):
