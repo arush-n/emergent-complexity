@@ -282,7 +282,9 @@ python -m emergent.experiments.morphology_interactions.replicator_search \
 
 Search artifacts include the initial `best_pattern.npz` and the exact
 `best_state.npz` at the score's recorded generation, so a claimed hit can be
-rescored independently with `evaluate_candidate_state`.
+rescored independently with `evaluate_candidate_state`. `history.csv` tracks
+generation winners, while `trace.csv` records every unique candidate's exact
+identity and scored evidence at each search generation.
 
 ## Artifacts and reproducibility
 

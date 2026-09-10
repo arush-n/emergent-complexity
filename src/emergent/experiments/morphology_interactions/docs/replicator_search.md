@@ -85,10 +85,16 @@ contains:
 manifest.json       resolved search and software metadata
 summary.json        hit/fission flags and best-evidence summary
 history.csv         best score per evolutionary generation
+trace.csv           every unique candidate's best evidence per generation
 best_pattern.txt    human-readable #/. candidate
 best_pattern.npz    exact binary candidate matrix
 best_state.npz      exact world at the best evaluation generation
 ```
+
+`history.csv` is the compact progress trace for generation winners.
+`trace.csv` preserves the exact packed candidate identity and all scored
+copy/fission fields for every unique candidate evaluated in each evolutionary
+generation, so a large run can be audited without retaining every grid frame.
 
 `found=false` is an honest bounded-search result, not evidence that Conway's
 Game of Life has no self-replicators. Known engineered Life replicators are

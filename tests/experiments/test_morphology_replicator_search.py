@@ -118,12 +118,15 @@ def test_small_search_replays_exactly(tmp_path) -> None:
     np.testing.assert_array_equal(first.best_state, second.best_state)
     assert first.best_evaluation == second.best_evaluation
     assert first.history == second.history
+    assert first.trace == second.trace
     assert first.evaluations == second.evaluations
 
     output_dir = write_search_artifacts(first, tmp_path / "search", timestamp="test")
     assert (output_dir / "manifest.json").exists()
     assert (output_dir / "summary.json").exists()
     assert (output_dir / "history.csv").exists()
+    assert (output_dir / "trace.csv").exists()
+    assert len(first.trace) >= len(first.history)
     with np.load(output_dir / "best_state.npz") as artifact:
         np.testing.assert_array_equal(artifact["grid"], first.best_state)
 

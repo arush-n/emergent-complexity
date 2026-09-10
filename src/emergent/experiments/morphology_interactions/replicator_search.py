@@ -47,6 +47,7 @@ from .components import MOORE_OFFSETS, detect_components, detect_components_batc
 from .encoding import deterministic_uint64
 
 NATIVE_RULE = "B3/S23"
+TraceRow = dict[str, int | float | bool | str]
 
 
 @dataclass(frozen=True)
@@ -172,7 +173,8 @@ class ReplicatorSearchResult:
     best_state: np.ndarray
     found: bool
     found_search_generation: int | None
-    history: list[dict[str, int | float | bool | str]]
+    history: list[TraceRow]
+    trace: list[TraceRow]
     evaluations: dict[ShapeKey, ReplicatorEvaluation]
     elapsed_seconds: float
 
@@ -539,6 +541,33 @@ def _worlds_for_candidates(candidates: list[Candidate], world_size: int) -> np.n
     return worlds
 
 
+def _trace_row(
+    search_generation: int,
+    candidate: Candidate,
+    evaluation: ReplicatorEvaluation,
+) -> TraceRow:
+    """Serialize one candidate's best rollout evidence for ``trace.csv``."""
+
+    return {
+        "search_generation": search_generation,
+        "candidate_height": candidate.key.height,
+        "candidate_width": candidate.key.width,
+        "candidate_packed_hex": candidate.key.packed_hex,
+        "candidate_cells": candidate.cell_count,
+        "best_generation": evaluation.best_generation,
+        "best_copy_count": evaluation.best_copy_count,
+        "best_purity": evaluation.best_purity,
+        "best_approximate_purity": evaluation.best_approximate_purity,
+        "best_repeat_count": evaluation.best_repeat_count,
+        "best_repeat_purity": evaluation.best_repeat_purity,
+        "best_mass_balance": evaluation.best_mass_balance,
+        "best_similarity": evaluation.best_similarity,
+        "best_score": evaluation.best_score,
+        "is_replicator": evaluation.is_replicator,
+        "is_fission_like": evaluation.is_fission_like,
+    }
+
+
 def _evaluate_candidates(
     candidates: list[Candidate],
     config: ReplicatorSearchConfig,
@@ -593,7 +622,8 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
     birth_mask, survival_mask = rule_to_masks(parse_rule(NATIVE_RULE))
     population = initial_population(config)
     evaluations: dict[ShapeKey, ReplicatorEvaluation] = {}
-    history: list[dict[str, int | float | bool | str]] = []
+    history: list[TraceRow] = []
+    trace: list[TraceRow] = []
     best_candidate = population[0]
     best_evaluation = ReplicatorEvaluation(
         candidate_key=best_candidate.key,
@@ -623,6 +653,14 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
             survival_mask,
         )
         evaluations.update(current_evaluations)
+        unique_population = {candidate.key: candidate for candidate in population}
+        trace.extend(
+            _trace_row(search_generation, candidate, current_evaluations[candidate.key])
+            for candidate in sorted(
+                unique_population.values(),
+                key=lambda item: shape_key_sort_key(item.key),
+            )
+        )
         scored = [(candidate, current_evaluations[candidate.key]) for candidate in population]
         scored.sort(key=lambda item: shape_key_sort_key(item[0].key))
         scored.sort(key=lambda item: _evaluation_rank(item[1]), reverse=True)
@@ -657,6 +695,7 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
                 "best_height": generation_best_candidate.matrix.shape[0],
                 "best_width": generation_best_candidate.matrix.shape[1],
                 "best_cells": generation_best_candidate.cell_count,
+                "best_packed_hex": generation_best_candidate.key.packed_hex,
             }
         )
         if found_search_generation is not None or search_generation == config.generations:
@@ -687,6 +726,7 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
         found=best_evaluation.is_replicator,
         found_search_generation=found_search_generation,
         history=history,
+        trace=trace,
         evaluations=evaluations,
         elapsed_seconds=time.perf_counter() - start,
     )
@@ -744,6 +784,7 @@ def write_search_artifacts(
         "found_search_generation": result.found_search_generation,
         "elapsed_seconds": result.elapsed_seconds,
         "evaluated_unique_candidates": len(result.evaluations),
+        "trace_rows": len(result.trace),
         "best_pattern": matrix_to_text(result.best_candidate.matrix),
         "best_shape_key": _shape_key_json(result.best_candidate.key),
         "best_state_generation": best.best_generation,
@@ -776,6 +817,12 @@ def write_search_artifacts(
         if fields:
             writer.writeheader()
             writer.writerows(result.history)
+    trace_fields = tuple(result.trace[0].keys()) if result.trace else ()
+    with (target / "trace.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=trace_fields)
+        if trace_fields:
+            writer.writeheader()
+            writer.writerows(result.trace)
     (target / "best_pattern.txt").write_text(
         matrix_to_text(result.best_candidate.matrix) + "\n",
         encoding="utf-8",
@@ -849,6 +896,7 @@ def main(argv: list[str] | None = None) -> None:
                     "is_fission_like": result.best_evaluation.is_fission_like,
                 },
                 "evaluated_unique_candidates": len(result.evaluations),
+                "trace_rows": len(result.trace),
                 "elapsed_seconds": result.elapsed_seconds,
                 "output_dir": None if output_dir is None else str(output_dir),
             },
