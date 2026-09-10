@@ -120,12 +120,14 @@ def test_small_search_replays_exactly(tmp_path) -> None:
     assert first.history == second.history
     assert first.trace == second.trace
     assert first.evaluations == second.evaluations
+    assert first.terminal_reports == second.terminal_reports
 
     output_dir = write_search_artifacts(first, tmp_path / "search", timestamp="test")
     assert (output_dir / "manifest.json").exists()
     assert (output_dir / "summary.json").exists()
     assert (output_dir / "history.csv").exists()
     assert (output_dir / "trace.csv").exists()
+    assert (output_dir / "terminal.csv").exists()
     assert (output_dir / "identity_audit.json").exists()
     assert len(first.trace) >= len(first.history)
     with np.load(output_dir / "best_state.npz") as artifact:
@@ -140,3 +142,49 @@ def test_small_search_replays_exactly(tmp_path) -> None:
     for _ in range(first.best_evaluation.best_generation):
         replay = np.asarray(step_jit(replay, birth, survival), dtype=np.uint8)
     np.testing.assert_array_equal(replay, first.best_state)
+
+
+def test_terminal_rollouts_stop_stable_and_periodic_worlds() -> None:
+    stable_config = ReplicatorSearchConfig(
+        seed=12,
+        candidate_size=4,
+        world_size=16,
+        population_size=1,
+        elite_count=1,
+        generations=0,
+        evaluation_steps=8,
+        initial_live_cells=4,
+        component_backend="python",
+    )
+    stable_result = run_replicator_search(stable_config)
+    stable_candidate = next(
+        candidate
+        for candidate in initial_population(stable_config)
+        if candidate.matrix.shape == (2, 2)
+    )
+    stable_report = stable_result.terminal_reports[stable_candidate.key]
+
+    assert stable_report.reason == "stable"
+    assert stable_report.generation == 1
+    assert stable_report.period == 1
+
+    periodic_config = ReplicatorSearchConfig(
+        seed=12,
+        candidate_size=4,
+        world_size=16,
+        population_size=2,
+        elite_count=1,
+        generations=0,
+        evaluation_steps=8,
+        initial_live_cells=4,
+        component_backend="python",
+    )
+    periodic_result = run_replicator_search(periodic_config)
+    blinker = next(
+        candidate for candidate in initial_population(periodic_config) if candidate.cell_count == 3
+    )
+    periodic_report = periodic_result.terminal_reports[blinker.key]
+
+    assert periodic_report.reason == "cycle_2"
+    assert periodic_report.generation == 2
+    assert periodic_report.period == 2

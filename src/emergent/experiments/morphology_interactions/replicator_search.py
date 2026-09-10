@@ -23,7 +23,7 @@ import platform
 import time
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,6 +67,8 @@ class ReplicatorSearchConfig:
     component_backend: str = "auto"
     rotation_invariant: bool = True
     reflection_invariant: bool = False
+    terminate_on_terminal: bool = True
+    max_cycle_period: int = 2
 
     def __post_init__(self) -> None:
         integer_fields = (
@@ -79,6 +81,7 @@ class ReplicatorSearchConfig:
             "evaluation_steps",
             "mutations_per_child",
             "initial_live_cells",
+            "max_cycle_period",
         )
         for name in integer_fields:
             value = getattr(self, name)
@@ -99,6 +102,8 @@ class ReplicatorSearchConfig:
             raise ValueError("elite_count must be between 1 and population_size")
         if self.initial_live_cells < 1:
             raise ValueError("initial_live_cells must be positive")
+        if self.max_cycle_period < 1:
+            raise ValueError("max_cycle_period must be positive")
         if (
             not isinstance(self.min_purity, (int, float))
             or not 0.0 <= float(self.min_purity) <= 1.0
@@ -107,7 +112,11 @@ class ReplicatorSearchConfig:
         object.__setattr__(self, "min_purity", float(self.min_purity))
         if self.component_backend not in {"auto", "python", "scipy"}:
             raise ValueError("component_backend must be one of: auto, python, scipy")
-        for name in ("rotation_invariant", "reflection_invariant"):
+        for name in (
+            "rotation_invariant",
+            "reflection_invariant",
+            "terminate_on_terminal",
+        ):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be a boolean")
         if self.reflection_invariant and not self.rotation_invariant:
@@ -163,6 +172,16 @@ class ReplicatorEvaluation:
     is_fission_like: bool
 
 
+@dataclass(frozen=True)
+class RolloutTermination:
+    """Reason one candidate environment stopped advancing."""
+
+    candidate_key: ShapeKey
+    generation: int
+    reason: str
+    period: int | None = None
+
+
 @dataclass
 class ReplicatorSearchResult:
     """Search output with compact history and evaluated candidate cache."""
@@ -177,6 +196,7 @@ class ReplicatorSearchResult:
     trace: list[TraceRow]
     evaluations: dict[ShapeKey, ReplicatorEvaluation]
     elapsed_seconds: float
+    terminal_reports: dict[ShapeKey, RolloutTermination] = field(default_factory=dict)
 
 
 def _is_connected(coordinates: set[tuple[int, int]]) -> bool:
@@ -573,8 +593,19 @@ def _evaluate_candidates(
     config: ReplicatorSearchConfig,
     birth_mask: Any,
     survival_mask: Any,
-) -> tuple[dict[ShapeKey, ReplicatorEvaluation], dict[ShapeKey, np.ndarray]]:
-    """Batch native rollouts, using host morphology checks between steps."""
+) -> tuple[
+    dict[ShapeKey, ReplicatorEvaluation],
+    dict[ShapeKey, np.ndarray],
+    dict[ShapeKey, RolloutTermination],
+]:
+    """Batch native rollouts with independent deterministic termination.
+
+    The transition remains one JAX batch call for all currently active
+    candidates. Terminal worlds are carried forward unchanged in that batch,
+    while component analysis and exact-state recurrence checks happen on the
+    host between transitions. This lets short-lived candidates stop without
+    forcing the rest of the population to stop with them.
+    """
 
     unique_candidates: list[Candidate] = []
     seen: set[ShapeKey] = set()
@@ -582,23 +613,32 @@ def _evaluate_candidates(
         if candidate.key not in seen:
             seen.add(candidate.key)
             unique_candidates.append(candidate)
-    current = jnp.asarray(
-        _worlds_for_candidates(unique_candidates, config.world_size), dtype=jnp.uint8
-    )
+    initial_worlds = _worlds_for_candidates(unique_candidates, config.world_size)
+    current = jnp.asarray(initial_worlds, dtype=jnp.uint8)
     best: dict[ShapeKey, ReplicatorEvaluation] = {}
     best_states: dict[ShapeKey, np.ndarray] = {}
+    terminal_reports: dict[ShapeKey, RolloutTermination] = {}
+    active = np.ones(len(unique_candidates), dtype=bool)
+    state_history: list[dict[bytes, int]] = [
+        {np.ascontiguousarray(world, dtype=np.uint8).tobytes(): 0} for world in initial_worlds
+    ]
     for generation in range(config.evaluation_steps + 1):
+        active_indices = np.flatnonzero(active)
+        if active_indices.size == 0:
+            break
         host = np.asarray(jax.device_get(current), dtype=np.uint8)
         components_by_world = detect_components_batch(
-            host,
+            host[active_indices],
             min_component_cells=1,
             backend=config.component_backend,
         )
-        for index, candidate in enumerate(unique_candidates):
+        for local_index, index_value in enumerate(active_indices):
+            index = int(index_value)
+            candidate = unique_candidates[index]
             observation = _observation(
                 candidate,
                 host[index],
-                components_by_world[index],
+                components_by_world[local_index],
                 generation,
                 config.min_purity,
                 rotation_invariant=config.rotation_invariant,
@@ -610,9 +650,59 @@ def _evaluate_candidates(
                 state = host[index].copy()
                 state.setflags(write=False)
                 best_states[candidate.key] = state
+
+            if observation.is_replicator:
+                terminal_reports[candidate.key] = RolloutTermination(
+                    candidate_key=candidate.key,
+                    generation=generation,
+                    reason="replicator",
+                )
+                active[index] = False
+                continue
+
+            if config.terminate_on_terminal and generation > 0:
+                if not np.any(host[index]):
+                    terminal_reports[candidate.key] = RolloutTermination(
+                        candidate_key=candidate.key,
+                        generation=generation,
+                        reason="extinct",
+                    )
+                    active[index] = False
+                    continue
+                fingerprint = np.ascontiguousarray(host[index], dtype=np.uint8).tobytes()
+                previous_generation = state_history[index].get(fingerprint)
+                if previous_generation is not None:
+                    period = generation - previous_generation
+                    if period <= config.max_cycle_period:
+                        reason = "stable" if period == 1 else f"cycle_{period}"
+                        terminal_reports[candidate.key] = RolloutTermination(
+                            candidate_key=candidate.key,
+                            generation=generation,
+                            reason=reason,
+                            period=period,
+                        )
+                        active[index] = False
+                        continue
+                else:
+                    state_history[index][fingerprint] = generation
+
         if generation < config.evaluation_steps:
-            current = batched_step(current, birth_mask, survival_mask)
-    return best, best_states
+            if not np.any(active):
+                break
+            next_current = batched_step(current, birth_mask, survival_mask)
+            current = jnp.where(
+                jnp.asarray(active)[:, None, None],
+                next_current,
+                current,
+            )
+    for index, candidate in enumerate(unique_candidates):
+        if candidate.key not in terminal_reports:
+            terminal_reports[candidate.key] = RolloutTermination(
+                candidate_key=candidate.key,
+                generation=config.evaluation_steps,
+                reason="horizon",
+            )
+    return best, best_states, terminal_reports
 
 
 def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchResult:
@@ -624,6 +714,7 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
     evaluations: dict[ShapeKey, ReplicatorEvaluation] = {}
     history: list[TraceRow] = []
     trace: list[TraceRow] = []
+    terminal_reports: dict[ShapeKey, RolloutTermination] = {}
     best_candidate = population[0]
     best_evaluation = ReplicatorEvaluation(
         candidate_key=best_candidate.key,
@@ -646,13 +737,14 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
     best_state.setflags(write=False)
 
     for search_generation in range(config.generations + 1):
-        current_evaluations, current_states = _evaluate_candidates(
+        current_evaluations, current_states, current_terminal_reports = _evaluate_candidates(
             population,
             config,
             birth_mask,
             survival_mask,
         )
         evaluations.update(current_evaluations)
+        terminal_reports.update(current_terminal_reports)
         unique_population = {candidate.key: candidate for candidate in population}
         trace.extend(
             _trace_row(search_generation, candidate, current_evaluations[candidate.key])
@@ -696,6 +788,23 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
                 "best_width": generation_best_candidate.matrix.shape[1],
                 "best_cells": generation_best_candidate.cell_count,
                 "best_packed_hex": generation_best_candidate.key.packed_hex,
+                "terminal_rollouts": len(current_terminal_reports),
+                "terminal_replicators": sum(
+                    report.reason == "replicator" for report in current_terminal_reports.values()
+                ),
+                "terminal_stable": sum(
+                    report.reason == "stable" for report in current_terminal_reports.values()
+                ),
+                "terminal_cycles": sum(
+                    report.reason.startswith("cycle_")
+                    for report in current_terminal_reports.values()
+                ),
+                "terminal_extinct": sum(
+                    report.reason == "extinct" for report in current_terminal_reports.values()
+                ),
+                "terminal_horizon": sum(
+                    report.reason == "horizon" for report in current_terminal_reports.values()
+                ),
             }
         )
         if found_search_generation is not None or search_generation == config.generations:
@@ -729,6 +838,7 @@ def run_replicator_search(config: ReplicatorSearchConfig) -> ReplicatorSearchRes
         trace=trace,
         evaluations=evaluations,
         elapsed_seconds=time.perf_counter() - start,
+        terminal_reports=terminal_reports,
     )
 
 
@@ -785,6 +895,10 @@ def write_search_artifacts(
         "elapsed_seconds": result.elapsed_seconds,
         "evaluated_unique_candidates": len(result.evaluations),
         "trace_rows": len(result.trace),
+        "terminal_rollouts": len(result.terminal_reports),
+        "terminal_reason_counts": dict(
+            sorted(Counter(report.reason for report in result.terminal_reports.values()).items())
+        ),
         "best_pattern": matrix_to_text(result.best_candidate.matrix),
         "best_shape_key": _shape_key_json(result.best_candidate.key),
         "best_state_generation": best.best_generation,
@@ -823,6 +937,32 @@ def write_search_artifacts(
         if trace_fields:
             writer.writeheader()
             writer.writerows(result.trace)
+    terminal_fields = (
+        "candidate_height",
+        "candidate_width",
+        "candidate_packed_hex",
+        "terminal_generation",
+        "terminal_reason",
+        "period",
+    )
+    terminal_rows = [
+        {
+            "candidate_height": key.height,
+            "candidate_width": key.width,
+            "candidate_packed_hex": key.packed_hex,
+            "terminal_generation": report.generation,
+            "terminal_reason": report.reason,
+            "period": report.period,
+        }
+        for key, report in sorted(
+            result.terminal_reports.items(),
+            key=lambda item: shape_key_sort_key(item[0]),
+        )
+    ]
+    with (target / "terminal.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=terminal_fields)
+        writer.writeheader()
+        writer.writerows(terminal_rows)
     (target / "identity_audit.json").write_text(
         json.dumps(
             audit_encodings(
@@ -859,6 +999,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mutations-per-child", type=int, default=2)
     parser.add_argument("--initial-live-cells", type=int, default=8)
     parser.add_argument("--min-purity", type=float, default=0.90)
+    parser.add_argument("--max-cycle-period", type=int, default=2)
+    parser.add_argument(
+        "--no-terminal-termination",
+        action="store_true",
+        help="run every rollout to evaluation_steps for a fixed-horizon ablation",
+    )
     parser.add_argument(
         "--component-backend",
         choices=("auto", "python", "scipy"),
@@ -884,6 +1030,8 @@ def main(argv: list[str] | None = None) -> None:
         mutations_per_child=args.mutations_per_child,
         initial_live_cells=args.initial_live_cells,
         min_purity=args.min_purity,
+        terminate_on_terminal=not args.no_terminal_termination,
+        max_cycle_period=args.max_cycle_period,
         component_backend=args.component_backend,
         reflection_invariant=args.reflection_invariant,
     )
@@ -910,6 +1058,14 @@ def main(argv: list[str] | None = None) -> None:
                 },
                 "evaluated_unique_candidates": len(result.evaluations),
                 "trace_rows": len(result.trace),
+                "terminal_rollouts": len(result.terminal_reports),
+                "terminal_reason_counts": dict(
+                    sorted(
+                        Counter(
+                            report.reason for report in result.terminal_reports.values()
+                        ).items()
+                    )
+                ),
                 "elapsed_seconds": result.elapsed_seconds,
                 "output_dir": None if output_dir is None else str(output_dir),
             },

@@ -40,8 +40,10 @@ Each search generation does the following:
 3. place each candidate in an independent centered world;
 4. roll all worlds out in one native JAX `batched_step` call per generation;
 5. detect toroidal components on the host and score exact canonical copies;
-6. retain the highest-ranked candidates; and
-7. create children with deterministic one-cell additions/removals that remain
+6. stop each rollout independently at extinction, a fixed point, a bounded
+   cycle, or an exact-copy hit;
+7. retain the highest-ranked candidates; and
+8. create children with deterministic one-cell additions/removals that remain
    connected and within the candidate canvas.
 
 No Python `hash`, wall-clock value, or unseeded random generator affects the
@@ -49,8 +51,10 @@ search. The same configuration and software environment therefore produce
 the same candidate order, rollouts, score history, and best pattern.
 
 The implementation is intentionally batched across candidates. Component
-analysis remains on the host because it is an experiment-specific analysis
-step; the physical transition remains the repository's native JAX function.
+analysis and exact recurrence fingerprints remain on the host because they are
+experiment-specific analysis steps; the physical transition remains the
+repository's native JAX function. A settled candidate is masked out of later
+JAX transitions while the other candidates in the same batch continue.
 
 ## Run a short search
 
@@ -69,6 +73,12 @@ python -m emergent.experiments.morphology_interactions.replicator_search \
   --output-dir artifacts/experiments/morphology_interactions/replicator_search/seed42
 ```
 
+Rollouts terminate on a fixed point, extinction, or a cycle up to period two
+by default. Use `--max-cycle-period N` to change that bound. The terminal
+classification is recorded in `terminal.csv`; a bounded rollout that does not
+settle is recorded as `horizon`. Use `--no-terminal-termination` only for a
+fixed-horizon comparison.
+
 The result is printed as JSON. When `--output-dir` is provided, the directory
 contains:
 
@@ -77,6 +87,7 @@ manifest.json       resolved search and software metadata
 summary.json        hit/fission flags and best-evidence summary
 history.csv         best score per evolutionary generation
 trace.csv           every unique candidate's best evidence per generation
+terminal.csv        terminal reason and generation for each rollout
 best_pattern.txt    human-readable #/. candidate
 best_pattern.npz    exact binary candidate matrix
 best_state.npz      exact world at the best evaluation generation
