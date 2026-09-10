@@ -34,6 +34,7 @@ from .runtime import (
     ExactCycle,
     PreparedFields,
     grid_state_bytes,
+    morphology_state_bytes,
     pack_grids,
     prepare_batch,
     state_bytes,
@@ -222,11 +223,12 @@ def run_worker(args: argparse.Namespace) -> None:
             "strategy_schedule": schedule_manifest(base_config, args.strategy_schedule),
             "rollout_horizon": None,
             "stop_condition": (
-                "exact_unchanged_grid_or_grid_recurrence_or_full_state_recurrence"
+                "exact_unchanged_grid_or_grid_recurrence_or_morphology_recurrence_or_full_state_recurrence"
             ),
             "terminal_outcome": "failure_and_deterministic_slot_refill",
             "unchanged_grid_eviction": "exact_grid_equality_between_consecutive_states",
             "grid_recurrence_eviction": "exact_grid_only_recurrence_fast_path",
+            "morphology_recurrence_eviction": "exact_canonical_shape_multiset_recurrence_fast_path",
             "batch_size": args.batch_size,
             "worker_id": args.worker_id,
             "workers": args.workers,
@@ -261,6 +263,7 @@ def run_worker(args: argparse.Namespace) -> None:
     grids: list[np.ndarray] = []
     cycles: list[ExactCycle] = []
     grid_cycles: list[ExactCycle] = []
+    morphology_cycles: list[ExactCycle] = []
     baselines: list[Counter[ShapeKey]] = []
     milestones: list[dict[ShapeKey, int]] = []
     trial_ids: list[int] = []
@@ -398,6 +401,7 @@ def run_worker(args: argparse.Namespace) -> None:
     for slot in range(args.batch_size):
         baselines[slot] = initial_counts[slot]
         cached_components[slot] = initial_components[slot]
+        morphology_cycles.append(ExactCycle(morphology_state_bytes(initial_counts[slot])))
     # The dense state remains on the JAX backend between transitions.  Host
     # copies are made only for ragged morphology/chemistry preparation,
     # archival, and exact-cycle bookkeeping.
@@ -407,6 +411,7 @@ def run_worker(args: argparse.Namespace) -> None:
     completed = 0
     unchanged_evictions = 0
     grid_repeat_evictions = 0
+    morphology_repeat_evictions = 0
     copy_leads = 0
     active_sites_total = 0
     interesting_shapes = 0
@@ -490,6 +495,7 @@ def run_worker(args: argparse.Namespace) -> None:
             "failed_trials": completed,
             "unchanged_evictions": unchanged_evictions,
             "grid_repeat_evictions": grid_repeat_evictions,
+            "morphology_repeat_evictions": morphology_repeat_evictions,
             "started_trials": serial,
             "skipped_duplicate_starts": skipped_starts,
             "unique_trial_keys": len(seen_trial_keys),
@@ -572,8 +578,16 @@ def run_worker(args: argparse.Namespace) -> None:
                         )
                 period = cycles[slot].observe(state_bytes(engine, following[slot]))
                 grid_period = grid_cycles[slot].observe(grid_state_bytes(following[slot]))
+                morphology_period = morphology_cycles[slot].observe(
+                    morphology_state_bytes(counts)
+                )
                 unchanged = bool(unchanged_flags[slot])
-                if unchanged or grid_period is not None or period is not None:
+                if (
+                    unchanged
+                    or grid_period is not None
+                    or morphology_period is not None
+                    or period is not None
+                ):
                     reason = (
                         "unchanged"
                         if unchanged
@@ -581,9 +595,13 @@ def run_worker(args: argparse.Namespace) -> None:
                             "grid_repeat"
                             if grid_period is not None
                             else (
-                                "extinct"
-                                if not np.any(following[slot])
-                                else ("stable" if period == 1 else "repeat")
+                                "morphology_repeat"
+                                if morphology_period is not None
+                                else (
+                                    "extinct"
+                                    if not np.any(following[slot])
+                                    else ("stable" if period == 1 else "repeat")
+                                )
                             )
                         )
                     )
@@ -598,6 +616,7 @@ def run_worker(args: argparse.Namespace) -> None:
                             "generation": engine.generation,
                             "period": period,
                             "grid_period": grid_period,
+                            "morphology_period": morphology_period,
                             "reason": reason,
                             "unchanged_grid": unchanged,
                             "strategy_key": plans[slot].strategy.key,
@@ -612,6 +631,8 @@ def run_worker(args: argparse.Namespace) -> None:
                         unchanged_evictions += 1
                     if grid_period is not None:
                         grid_repeat_evictions += 1
+                    if morphology_period is not None:
+                        morphology_repeat_evictions += 1
                     replacement = spawn(
                         slot,
                         previous_plan=plans[slot],
@@ -629,6 +650,9 @@ def run_worker(args: argparse.Namespace) -> None:
                         plans[slot],
                         cached_components[slot],
                     ) = replacement
+                    morphology_cycles[slot] = ExactCycle(
+                        morphology_state_bytes(baselines[slot])
+                    )
                     current = current.at[slot].set(jnp.asarray(replacement_grid, dtype=jnp.uint8))
                 else:
                     cached_components[slot] = components_after[slot]
@@ -667,6 +691,7 @@ def run_worker(args: argparse.Namespace) -> None:
                 "terminal_failures": completed,
                 "unchanged_evictions": unchanged_evictions,
                 "grid_repeat_evictions": grid_repeat_evictions,
+                "morphology_repeat_evictions": morphology_repeat_evictions,
                 "started_trials": serial,
                 "skipped_duplicate_starts": skipped_starts,
                 "reason": "error" if sys.exc_info()[0] else "operator_or_test_limit",

@@ -1,8 +1,11 @@
+from collections import Counter
+
 import numpy as np
 import pytest
 
 from emergent.core.rules import parse_rule, rule_to_masks
 from emergent.core.step import batched_step
+from emergent.experiments.morphology_interactions.canonical import ShapeKey
 from emergent.experiments.morphology_interactions.rna_chemistry.config import RNAExperimentConfig
 from emergent.experiments.morphology_interactions.rna_chemistry.engine import RNAChemistryEngine
 from emergent.experiments.morphology_interactions.rna_chemistry.search.replay import verify
@@ -10,6 +13,7 @@ from emergent.experiments.morphology_interactions.rna_chemistry.search.run impor
 from emergent.experiments.morphology_interactions.rna_chemistry.search.runtime import (
     ExactCycle,
     grid_state_bytes,
+    morphology_state_bytes,
     pack_grids,
     prepare,
     prepare_batch,
@@ -145,6 +149,14 @@ def test_grid_only_cycle_detection_catches_repeating_spatial_state():
     assert cycle.observe(grid_state_bytes(state_b)) == 2
 
 
+def test_morphology_state_encoding_is_order_independent():
+    first = ShapeKey(1, 1, b"\x80")
+    second = ShapeKey(2, 2, b"\xc0")
+    left = Counter({first: 1, second: 2})
+    right = Counter({second: 2, first: 1})
+    assert morphology_state_bytes(left) == morphology_state_bytes(right)
+
+
 def test_warmup_and_detection_phase_are_part_of_terminal_identity():
     config = RNAExperimentConfig(
         width=8, height=8, warmup_steps=3, detect_every=2, calibration_size=32
@@ -202,7 +214,7 @@ def test_search_evicts_exactly_unchanged_grid_during_warmup(tmp_path):
     assert terminal["failure"] is True
 
 
-def test_search_evicts_exact_repeating_grid_before_full_chemistry_state(tmp_path):
+def test_search_evicts_exact_repeating_morphology_before_full_chemistry_state(tmp_path):
     args = parser().parse_args(
         [
             "--output-dir",
@@ -238,8 +250,8 @@ def test_search_evicts_exact_repeating_grid_before_full_chemistry_state(tmp_path
         for line in (tmp_path / "worker_000" / "events.jsonl").read_text().splitlines()
     ]
     terminal = next(event for event in events if event["event"] == "terminal")
-    assert terminal["reason"] == "grid_repeat"
-    assert terminal["grid_period"] == 2
+    assert terminal["reason"] == "morphology_repeat"
+    assert terminal["morphology_period"] == 1
     assert terminal["failure"] is True
 
 

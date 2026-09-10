@@ -4,9 +4,10 @@ Use [RNA Observatory](viewer/README.md) to watch worlds, replay individual
 transitions, and inspect the exact local rules and their effects.
 
 This runner samples deterministic RNA chemistry worlds indefinitely. Each
-environment has **no generation horizon**. Once its grid repeats, its complete
-dynamic state repeats, or an exact transition leaves its grid unchanged, its
-slot receives a fresh seeded world. Other environments continue
+environment has **no generation horizon**. Once its grid repeats, its canonical
+morphology multiset repeats, its complete dynamic state repeats, or an exact
+transition leaves its grid unchanged, its slot receives a fresh seeded world.
+Other environments continue
 at their existing ages. A finite toroidal world will eventually repeat under
 this deterministic chemistry, but the required time can be extremely long.
 
@@ -28,7 +29,8 @@ schedule gives each replacement a different deterministic strategy/configuration
 Every trial has a stable `trial_key`, resolved `config_key`, initial-state key,
 and composite test key. Duplicate `(configuration, initial state)` tests are
 skipped. Terminal worlds are recorded as failed trials (`failure: true`) with
-their exact reason (`extinct`, `stable`, `repeat`, `grid_repeat`, or `unchanged`) and then
+their exact reason (`extinct`, `stable`, `repeat`, `grid_repeat`,
+`morphology_repeat`, or `unchanged`) and then
 replaced. The
 replacement `start` event points to the failed trial and records its new
 strategy/configuration. Universe seed and initial-grid seed are recorded
@@ -43,24 +45,25 @@ replication in isolation.
 
 ## Exact termination
 
-The runner keeps two exact Brent detectors. A grid-only detector quickly evicts
-spatially repeating oscillators or movers, while a full-state detector compares
+The runner keeps three exact Brent detectors. A grid-only detector quickly evicts
+spatially repeating oscillators or movers. A morphology detector compares the
+sorted multiset of canonical shapes and evicts worlds whose organism-level
+composition repeats even when objects have moved. A full-state detector compares
 the serialized grid, warmup/detection phase, persistent binding sites, remaining
-lifetimes, zones, rules, strengths, and tie ordering. Both support any period
-without a hash-collision risk, and each stores one anchor per environment. The
-grid-only event records its exact `grid_period`; full-state recurrence remains
-available when chemistry state matters. Chemistry caches are periodically
-evicted without changing dynamics.
+lifetimes, zones, rules, strengths, and tie ordering. All support any period
+without a hash-collision risk and store one anchor per environment. Terminal
+events record `grid_period` or `morphology_period` when those fast paths fire.
+Chemistry caches are periodically evicted without changing dynamics.
 
-Unchanged grids, grid repeats, fixed points, extinction, and full-state periodic
-worlds are recorded separately. An
+Unchanged grids, grid repeats, morphology repeats, fixed points, extinction, and
+full-state periodic worlds are recorded separately. An
 `--max-ticks` option exists for benchmarks only: it interrupts the worker and
 does **not** classify remaining worlds as terminal. Normal runs omit it.
 
 Unchanged-grid eviction is exact: consecutive dense grid states are compared
 with a JAX predicate. There is no low-activity threshold or arbitrary
-stagnation window. A world that keeps changing without an exact grid recurrence
-remains active.
+stagnation window. A world that keeps changing without an exact grid or
+morphology recurrence remains active.
 
 ## Trace and evidence
 

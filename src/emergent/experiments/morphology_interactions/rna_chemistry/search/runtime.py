@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pickle
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import jax
@@ -230,6 +230,18 @@ def grid_state_bytes(grid: np.ndarray) -> bytes:
 
     values = np.asarray(grid, dtype=np.uint8)
     return np.packbits(np.ascontiguousarray(values).reshape(-1), bitorder="little").tobytes()
+
+
+def morphology_state_bytes(counts: Mapping[ShapeKey, int]) -> bytes:
+    """Serialize the exact multiset of canonical morphologies in a grid."""
+
+    ordered = tuple(
+        (key.height, key.width, key.packed, int(count))
+        for key, count in sorted(
+            counts.items(), key=lambda item: (item[0].height, item[0].width, item[0].packed)
+        )
+    )
+    return pickle.dumps(ordered, protocol=5)
 
 
 @dataclass
