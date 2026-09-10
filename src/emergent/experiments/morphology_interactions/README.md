@@ -16,6 +16,9 @@ simulator, frontend, server, or `emergent.core` behavior.
 Detailed design, benchmarking, requirements, and search notes are available in
 the scoped [docs](docs/) directory.
 
+The RNA-inspired chemistry extension is a separate experiment with its own
+configuration, artifacts, tests, and [README](rna_chemistry/README.md).
+
 ## Model
 
 The physical state is a binary toroidal grid `X_t`. The default transition is
