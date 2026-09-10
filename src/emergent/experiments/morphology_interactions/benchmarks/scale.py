@@ -322,7 +322,18 @@ def main(argv: list[str] | None = None) -> None:
         component_backend=args.component_backend,
         output_dir=args.output_dir,
     )
-    print(json.dumps(summary, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "parallel": summary["parallel"],
+                "global_diversity": summary["global_diversity"],
+                "encoding_audit": summary["encoding_audit"],
+                "output_dir": str(args.output_dir),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":
