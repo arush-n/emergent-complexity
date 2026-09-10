@@ -253,6 +253,37 @@ result = run_parallel(
 )
 ```
 
+## Self-replication search
+
+The optional `replicator_search.py` runner is a deterministic evolutionary
+probe for compact self-replicating or fission-like patterns under native
+Conway dynamics. It keeps each candidate as one connected morphology, rolls a
+population out in batched JAX worlds, and rewards later states containing at
+least two exact copies of the candidate with little non-copy debris. It does
+not use morphology interactions, so a hit is attributable to the native
+`B3/S23` substrate.
+
+The result also reports `is_fission_like` for a promising lead whose later
+state contains repeated daughter components with a different key. That lead
+signal is never promoted to the stricter `found` flag.
+
+This is a strict, inspectable structural criterion, not yet a complete
+cell-lineage proof. A no-hit short search is only a bounded negative result;
+known engineered Life replicators are generally much larger than the first
+candidate canvas. The full search protocol, artifact format, and validation
+guidance are in [docs/replicator_search.md](docs/replicator_search.md).
+
+```bash
+python -m emergent.experiments.morphology_interactions.replicator_search \
+  --candidate-size 9 --world-size 64 --population-size 32 \
+  --elite-count 8 --generations 20 --evaluation-steps 32 \
+  --output-dir artifacts/experiments/morphology_interactions/replicator_search/seed42
+```
+
+Search artifacts include the initial `best_pattern.npz` and the exact
+`best_state.npz` at the score's recorded generation, so a claimed hit can be
+rescored independently with `evaluate_candidate_state`.
+
 ## Artifacts and reproducibility
 
 Scalar runs write:

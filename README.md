@@ -2,7 +2,10 @@
 
 This repository is a small, reproducible cellular-automata laboratory. It provides a JAX simulation engine for Conway's Game of Life, arbitrary binary outer-totalistic `B/S` rules, keyed random initialization and rule generation, batched execution, trajectories, a thin FastAPI server, and a browser interface with 2D, 3D, comparison, and experiment modes.
 
-It deliberately does not classify rules or implement research analysis, machine learning, complexity metrics, or automated searches.
+The normal simulator stays focused on deterministic CA execution. Research
+analysis and automated search live in explicitly isolated experiment packages;
+the morphology-interactions package includes a native-Life self-replication
+probe without changing simulator or server semantics.
 
 Live demo: <https://arush-n.github.io/emergent-complexity/>
 
@@ -158,6 +161,8 @@ benchmarks, frontend behavior, deployment, and reproducibility. The detailed
 morphology-interactions design and benchmark notes remain next to that
 experiment under
 [`src/emergent/experiments/morphology_interactions/docs/`](src/emergent/experiments/morphology_interactions/docs/).
+Its optional native-Life replicator search is documented in
+[`docs/replicator_search.md`](src/emergent/experiments/morphology_interactions/docs/replicator_search.md).
 
 For new code, use `emergent.core` for the 2D API and `emergent.core3d` for the
 3D API. The `emergent.rules`, `emergent.random`, `emergent.simulate`,

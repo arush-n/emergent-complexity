@@ -30,6 +30,7 @@ run.py              single-run CLI
 sweep.py            alpha/seed CLI
 sensitivity.py      one-cell morphology derivative CLI
 parallel.py         lockstep multi-environment execution
+replicator_search.py deterministic native-Life self-replication probe
 ```
 
 Research notes and performance probes are kept in the scoped subfolders:
@@ -37,6 +38,7 @@ Research notes and performance probes are kept in the scoped subfolders:
 ```text
 docs/design.md
 docs/benchmarking.md
+docs/replicator_search.md
 benchmarks/short.py
 ```
 

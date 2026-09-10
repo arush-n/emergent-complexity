@@ -45,7 +45,7 @@ from .species import SpeciesRecord, SpeciesRegistry
 
 
 def __getattr__(name: str):
-    """Lazily expose parallel APIs without perturbing ``python -m`` imports."""
+    """Lazily expose optional runners without perturbing ``python -m`` imports."""
 
     if name == "ParallelExecutionConfig":
         from .parallel import ParallelExecutionConfig
@@ -59,11 +59,25 @@ def __getattr__(name: str):
         from .parallel import ParallelEngine, run_parallel
 
         return ParallelEngine if name == "ParallelEngine" else run_parallel
+    replicator_exports = {
+        "Candidate",
+        "ReplicatorEvaluation",
+        "ReplicatorSearchConfig",
+        "ReplicatorSearchResult",
+        "evaluate_candidate_state",
+        "run_replicator_search",
+        "write_search_artifacts",
+    }
+    if name in replicator_exports:
+        from . import replicator_search
+
+        return getattr(replicator_search, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "Component",
+    "Candidate",
     "Engine",
     "ExperimentResult",
     "InteractionUniverse",
@@ -76,6 +90,9 @@ __all__ = [
     "ParallelEngine",
     "ParallelExecutionConfig",
     "ParallelExperimentResult",
+    "ReplicatorEvaluation",
+    "ReplicatorSearchConfig",
+    "ReplicatorSearchResult",
     "ShapeKey",
     "SpeciesRecord",
     "SpeciesRegistry",
@@ -91,6 +108,7 @@ __all__ = [
     "detect_components",
     "detect_components_batch",
     "encode_shape",
+    "evaluate_candidate_state",
     "experimental_step",
     "find_interacting_pairs",
     "find_connected_components",
@@ -106,6 +124,7 @@ __all__ = [
     "novelty_rates",
     "resolve_owner_map",
     "run_experiment",
+    "run_replicator_search",
     "run_parallel",
     "scrambled_interaction",
     "shape_key_from_matrix",
@@ -113,4 +132,5 @@ __all__ = [
     "structured_interaction",
     "unwrap_toroidal_coordinates",
     "write_artifacts",
+    "write_search_artifacts",
 ]
