@@ -19,6 +19,16 @@ from ..canonical import ShapeKey
 from .alphabet import CANONICAL_PAIRS, WOBBLE_PAIRS, validate_bases
 from .sequence import ChemicalSequence
 
+_DEFAULT_KERNEL_LENGTH_CAPACITY = 32
+
+
+def _bucket_size(value: int) -> int:
+    """Return a power-of-two shape bucket for a positive sequence length."""
+
+    if value < 1:
+        raise ValueError("bucketed dimensions must be positive")
+    return 1 << (value - 1).bit_length()
+
 
 def _pair_matrix(bases: Any, allow_gu_wobble: bool) -> jax.Array:
     values = jnp.asarray(bases, dtype=jnp.uint8)
@@ -35,11 +45,14 @@ def _nussinov_table(
     bases: jax.Array,
     minimum_hairpin_separation: int,
     allow_gu_wobble: bool,
+    valid_length: int,
 ) -> jax.Array:
-    """Build a Nussinov maximum-pair table with static sequence shape."""
+    """Build a padded Nussinov table with a dynamic valid sequence prefix."""
 
     length = bases.shape[0]
     pairable = _pair_matrix(bases, allow_gu_wobble)
+    valid = jnp.arange(length) < jnp.asarray(valid_length, dtype=jnp.int32)
+    pairable &= valid[:, None] & valid[None, :]
     table = jnp.zeros((length, length), dtype=jnp.int16)
     indices = jnp.arange(length)
 
@@ -73,14 +86,21 @@ def _windowed_pair_mask(
     minimum_hairpin_separation: int,
     window: int,
     allow_gu_wobble: bool,
+    valid_length: int,
 ) -> jax.Array:
-    """Return a bounded-window pairing opportunity mask for long sequences."""
+    """Return a padded bounded-window pairing mask for a valid prefix."""
 
     length = bases.shape[0]
     pairable = _pair_matrix(bases, allow_gu_wobble)
     indices = jnp.arange(length)
     distance = jnp.abs(indices[:, None] - indices[None, :])
-    allowed = (distance > minimum_hairpin_separation) & (distance <= window)
+    valid = indices < jnp.asarray(valid_length, dtype=jnp.int32)
+    allowed = (
+        (distance > minimum_hairpin_separation)
+        & (distance <= window)
+        & valid[:, None]
+        & valid[None, :]
+    )
     return jnp.any(pairable & allowed, axis=1)
 
 
@@ -152,12 +172,16 @@ def fold_pairs(
     if not isinstance(allow_gu_wobble, bool):
         raise TypeError("allow_gu_wobble must be a boolean")
     if values.size <= max_nussinov_length:
+        length_capacity = max(_DEFAULT_KERNEL_LENGTH_CAPACITY, _bucket_size(values.size))
+        padded = np.zeros(length_capacity, dtype=np.uint8)
+        padded[: values.size] = values
         table = np.asarray(
             _nussinov_table(
-                jnp.asarray(values),
+                jnp.asarray(padded),
                 minimum_hairpin_separation,
                 allow_gu_wobble,
-            ),
+                values.size,
+            )[: values.size, : values.size],
             dtype=np.int16,
         )
         paired = _trace_nussinov(
@@ -167,13 +191,17 @@ def fold_pairs(
             allow_gu_wobble,
         )
     else:
+        length_capacity = max(_DEFAULT_KERNEL_LENGTH_CAPACITY, _bucket_size(values.size))
+        padded = np.zeros(length_capacity, dtype=np.uint8)
+        padded[: values.size] = values
         paired_mask = np.asarray(
             _windowed_pair_mask(
-                jnp.asarray(values),
+                jnp.asarray(padded),
                 minimum_hairpin_separation,
                 window,
                 allow_gu_wobble,
-            ),
+                values.size,
+            )[: values.size],
             dtype=bool,
         )
         pairable = np.asarray(

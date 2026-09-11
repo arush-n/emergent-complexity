@@ -4,11 +4,17 @@ import numpy as np
 
 from emergent.experiments.morphology_interactions.canonical import canonicalize_grid
 from emergent.experiments.morphology_interactions.components import Component
+from emergent.experiments.morphology_interactions.interaction import (
+    build_interaction_zone,
+    toroidal_dilate,
+)
 from emergent.experiments.morphology_interactions.rna_chemistry.chemistry import (
     evaluate_pair_chemistry,
     make_chemistry_universe,
 )
 from emergent.experiments.morphology_interactions.rna_chemistry.effects import (
+    component_site_coordinate,
+    component_site_coordinates,
     resolve_site_owner_map,
     site_effect_zone,
     site_interaction_to_effect,
@@ -53,6 +59,59 @@ def test_site_zone_is_local_and_spatially_mapped() -> None:
     assert zone.shape == (20, 20)
     assert np.any(zone)
     assert np.count_nonzero(zone) < 20 * 20
+
+
+def test_sparse_site_dilation_matches_dense_reference() -> None:
+    interaction, sequence = _site_interaction()
+    first = Component(np.asarray([[8, 4], [8, 5], [8, 6], [8, 7]], dtype=np.int64), 4)
+    second = Component(np.asarray([[8, 10], [8, 11], [8, 12], [8, 13]], dtype=np.int64), 4)
+    grid_shape = (20, 20)
+    encounter = build_interaction_zone(
+        first,
+        second,
+        grid_shape,
+        interaction_radius=3,
+        effect_padding=1,
+    )
+    mapped_first = component_site_coordinates(first, sequence, grid_shape)
+    mapped_second = component_site_coordinates(second, sequence, grid_shape)
+    anchors = np.zeros(grid_shape, dtype=bool)
+    for coordinate in np.concatenate(
+        (
+            mapped_first[interaction.site.start_a : interaction.site.end_a],
+            mapped_second[interaction.site.start_b : interaction.site.end_b],
+        )
+    ):
+        if np.all(coordinate >= 0):
+            anchors[tuple(coordinate)] = True
+    expected = toroidal_dilate(anchors, 4) & encounter
+    if not np.any(expected):
+        expected = encounter
+    actual = site_effect_zone(
+        first,
+        second,
+        sequence,
+        sequence,
+        interaction,
+        grid_shape,
+        interaction_radius=3,
+        effect_padding=1,
+        encounter_zone=encounter,
+        mapped_coordinates_a=mapped_first,
+        mapped_coordinates_b=mapped_second,
+    )
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_component_site_coordinates_are_reused_for_all_positions() -> None:
+    _, sequence = _site_interaction()
+    component = Component(np.asarray([[8, 4], [8, 5], [8, 6], [8, 7]], dtype=np.int64), 4)
+
+    mapped = component_site_coordinates(component, sequence, (20, 20))
+
+    np.testing.assert_array_equal(mapped, [[8, 4], [8, 5], [8, 6], [8, 7]])
+    for position, expected in enumerate(((8, 4), (8, 5), (8, 6), (8, 7))):
+        assert component_site_coordinate(component, sequence, position, (20, 20)) == expected
 
 
 def test_site_overlap_ties_resolve_deterministically() -> None:

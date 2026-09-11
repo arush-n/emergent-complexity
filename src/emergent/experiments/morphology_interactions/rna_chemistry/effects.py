@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -13,7 +14,7 @@ from ..canonical import (
     unwrap_toroidal_coordinates,
 )
 from ..components import Component
-from ..interaction import build_interaction_zone, interaction_vector_to_rule, toroidal_dilate
+from ..interaction import build_interaction_zone, interaction_vector_to_rule
 from .chemistry import SiteInteraction
 from .sequence import ChemicalSequence
 
@@ -109,19 +110,20 @@ def _transformed_coordinate(
     return row, col
 
 
-def component_site_coordinate(
+def component_site_coordinates(
     component: Component,
     sequence: ChemicalSequence,
-    position: int,
     grid_shape: tuple[int, int],
-) -> tuple[int, int] | None:
-    """Map one sequence position to a toroidal world coordinate when possible."""
+) -> np.ndarray:
+    """Map every sequence position to a toroidal world coordinate once.
 
-    if position < 0 or position >= sequence.length:
-        return None
-    coordinate = tuple(int(value) for value in sequence.site_coordinates[position])
-    if coordinate[0] < 0 or coordinate[1] < 0:
-        return None
+    The returned ``(length, 2)`` array uses ``(-1, -1)`` for abstract or
+    otherwise unmappable positions.  Computing the canonical transform once
+    per component is important when one encounter exposes many binding sites;
+    the previous scalar helper repeated the same matrix comparisons for every
+    nucleotide in every site.
+    """
+
     values = unwrap_toroidal_coordinates(component.coordinates, grid_shape)
     root = tuple(
         int(value)
@@ -133,32 +135,64 @@ def component_site_coordinate(
     local_values = values - local_min
     local_shape = (int(local_values[:, 0].max()) + 1, int(local_values[:, 1].max()) + 1)
     canonical = matrix_from_shape_key(sequence.shape_key)
-    target = {tuple(int(value) for value in item) for item in local_values.tolist()}
+    target = np.zeros(local_shape, dtype=bool)
+    target[local_values[:, 0], local_values[:, 1]] = True
+    valid_positions = np.all(sequence.site_coordinates >= 0, axis=1)
+    mapped = np.full((sequence.length, 2), -1, dtype=np.int64)
+    if not np.any(valid_positions):
+        mapped.setflags(write=False)
+        return mapped
 
-    transforms: list[tuple[np.ndarray, tuple[int, int]]] = []
     for rotation in range(4):
         rotated = np.rot90(canonical, k=rotation).copy()
-        transforms.append(
-            (rotated, _transformed_coordinate(canonical.shape, coordinate, rotation, False))
-        )
-        reflected = np.fliplr(rotated).copy()
-        transforms.append(
-            (reflected, _transformed_coordinate(canonical.shape, coordinate, rotation, True))
-        )
-    for candidate, transformed_site in transforms:
-        if candidate.shape != local_shape:
-            continue
-        candidate_coordinates = {
-            tuple(int(value) for value in item) for item in np.argwhere(candidate != 0)
-        }
-        if candidate_coordinates != target:
-            continue
-        unwrapped = np.asarray(transformed_site, dtype=np.int64) + local_min
-        return (
-            (root[0] + int(unwrapped[0])) % int(grid_shape[0]),
-            (root[1] + int(unwrapped[1])) % int(grid_shape[1]),
-        )
-    return None
+        candidates = ((rotated, False), (np.fliplr(rotated).copy(), True))
+        for candidate, reflected in candidates:
+            if candidate.shape != local_shape or not np.array_equal(candidate != 0, target):
+                continue
+            for position in np.flatnonzero(valid_positions):
+                transformed_site = _transformed_coordinate(
+                    canonical.shape,
+                    tuple(int(value) for value in sequence.site_coordinates[position]),
+                    rotation,
+                    reflected,
+                )
+                unwrapped = np.asarray(transformed_site, dtype=np.int64) + local_min
+                mapped[position] = (
+                    (root[0] + int(unwrapped[0])) % int(grid_shape[0]),
+                    (root[1] + int(unwrapped[1])) % int(grid_shape[1]),
+                )
+            mapped.setflags(write=False)
+            return mapped
+    mapped.setflags(write=False)
+    return mapped
+
+
+def component_site_coordinate(
+    component: Component,
+    sequence: ChemicalSequence,
+    position: int,
+    grid_shape: tuple[int, int],
+) -> tuple[int, int] | None:
+    """Map one sequence position to a toroidal world coordinate when possible."""
+
+    if position < 0 or position >= sequence.length:
+        return None
+    coordinate = component_site_coordinates(component, sequence, grid_shape)[position]
+    if coordinate[0] < 0 or coordinate[1] < 0:
+        return None
+    return int(coordinate[0]), int(coordinate[1])
+
+
+@lru_cache(maxsize=16)
+def _dilation_offsets(radius: int) -> np.ndarray:
+    """Cache the small Chebyshev offset stencil used by site zones."""
+
+    values = np.asarray(
+        [(row, col) for row in range(-radius, radius + 1) for col in range(-radius, radius + 1)],
+        dtype=np.int64,
+    )
+    values.setflags(write=False)
+    return values
 
 
 def site_effect_zone(
@@ -172,6 +206,9 @@ def site_effect_zone(
     interaction_radius: int = 2,
     effect_padding: int = 1,
     spatialize_sites: bool = True,
+    encounter_zone: np.ndarray | None = None,
+    mapped_coordinates_a: np.ndarray | None = None,
+    mapped_coordinates_b: np.ndarray | None = None,
 ) -> np.ndarray:
     """Anchor one site effect near its mapped sequence positions.
 
@@ -181,30 +218,58 @@ def site_effect_zone(
     validation while supporting Stage 2 spatialized sites whenever possible.
     """
 
-    encounter_zone = build_interaction_zone(
-        component_a,
-        component_b,
-        grid_shape,
-        interaction_radius=interaction_radius,
-        effect_padding=effect_padding,
-    )
+    if encounter_zone is None:
+        encounter_zone = build_interaction_zone(
+            component_a,
+            component_b,
+            grid_shape,
+            interaction_radius=interaction_radius,
+            effect_padding=effect_padding,
+        )
+    else:
+        encounter_zone = np.asarray(encounter_zone, dtype=bool)
+        if encounter_zone.shape != grid_shape:
+            raise ValueError("encounter_zone must match grid_shape")
     if not spatialize_sites:
         return encounter_zone
     site = interaction.site
-    anchors = np.zeros(grid_shape, dtype=bool)
-    positions_a = range(site.start_a, site.end_a)
-    positions_b = range(site.end_b - 1, site.start_b - 1, -1)
-    for position in positions_a:
-        coordinate = component_site_coordinate(component_a, sequence_a, position, grid_shape)
-        if coordinate is not None:
-            anchors[coordinate] = True
-    for position in positions_b:
-        coordinate = component_site_coordinate(component_b, sequence_b, position, grid_shape)
-        if coordinate is not None:
-            anchors[coordinate] = True
-    if not np.any(anchors):
+    first_coordinates = (
+        component_site_coordinates(component_a, sequence_a, grid_shape)
+        if mapped_coordinates_a is None
+        else np.asarray(mapped_coordinates_a, dtype=np.int64)
+    )
+    second_coordinates = (
+        component_site_coordinates(component_b, sequence_b, grid_shape)
+        if mapped_coordinates_b is None
+        else np.asarray(mapped_coordinates_b, dtype=np.int64)
+    )
+    anchor_rows = np.concatenate(
+        (
+            first_coordinates[site.start_a : site.end_a, 0],
+            second_coordinates[site.start_b : site.end_b, 0],
+        )
+    )
+    anchor_cols = np.concatenate(
+        (
+            first_coordinates[site.start_a : site.end_a, 1],
+            second_coordinates[site.start_b : site.end_b, 1],
+        )
+    )
+    valid = (anchor_rows >= 0) & (anchor_cols >= 0)
+    if not np.any(valid):
         return encounter_zone
-    localized = toroidal_dilate(anchors, interaction_radius + effect_padding)
+    # The old implementation materialized a full-grid anchor mask and then
+    # performed (2r+1)^2 full-grid rolls for every site.  Binding sites are
+    # short and sparse, so enumerate their bounded toroidal neighborhoods and
+    # write only those coordinates.  This is exactly the same Chebyshev
+    # dilation, followed by the same encounter-zone intersection, without a
+    # full-grid scan per site.
+    radius = interaction_radius + effect_padding
+    offsets = _dilation_offsets(radius)
+    rows = (anchor_rows[valid, None] + offsets[None, :, 0]).reshape(-1) % int(grid_shape[0])
+    cols = (anchor_cols[valid, None] + offsets[None, :, 1]).reshape(-1) % int(grid_shape[1])
+    localized = np.zeros(grid_shape, dtype=bool)
+    localized[rows, cols] = True
     localized &= encounter_zone
     return localized if np.any(localized) else encounter_zone
 

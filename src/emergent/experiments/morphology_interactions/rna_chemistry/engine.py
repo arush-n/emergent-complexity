@@ -29,7 +29,7 @@ from ..canonical import (
     shape_key_sort_key,
 )
 from ..components import Component, detect_components
-from ..interaction import find_interacting_pairs
+from ..interaction import build_interaction_zone, find_interacting_pairs
 from ..local_step import step_with_interactions
 from ..native_api import load_native_grid
 from .accessibility import AccessibilityCache
@@ -44,6 +44,7 @@ from .chemistry import (
 from .config import RNAExperimentConfig
 from .effects import (
     SiteEffect,
+    component_site_coordinates,
     resolve_site_owner_map,
     site_effect_zone,
     site_interaction_to_effect,
@@ -434,6 +435,8 @@ class RNAChemistryEngine:
         pair_chemistries: dict[tuple[ShapeKey, ShapeKey], PairChemistry] = {}
         zone_items: list[tuple[SiteEffect, np.ndarray]] = []
         active_sites: list[ActiveSite] = []
+        encounter_zones: dict[tuple[int, int], np.ndarray] = {}
+        mapped_coordinates: dict[int, np.ndarray] = {}
         component_pairs = find_interacting_pairs(
             [item[0] for item in observations],
             (self.height, self.width),
@@ -447,9 +450,38 @@ class RNAChemistryEngine:
             if shape_key_sort_key(first[1]) <= shape_key_sort_key(second[1]):
                 component_a, sequence_a = first[0], first[2]
                 component_b, sequence_b = second[0], second[2]
+                component_a_index, component_b_index = first_index, second_index
             else:
                 component_a, sequence_a = second[0], second[2]
                 component_b, sequence_b = first[0], first[2]
+                component_a_index, component_b_index = second_index, first_index
+            encounter_key = (first_index, second_index)
+            encounter_zone = encounter_zones.get(encounter_key)
+            if encounter_zone is None:
+                encounter_zone = build_interaction_zone(
+                    first[0],
+                    second[0],
+                    (self.height, self.width),
+                    interaction_radius=self.config.interaction_radius,
+                    effect_padding=self.config.effect_padding,
+                )
+                encounter_zones[encounter_key] = encounter_zone
+            coordinates_a = mapped_coordinates.get(component_a_index)
+            if coordinates_a is None:
+                coordinates_a = component_site_coordinates(
+                    component_a,
+                    sequence_a,
+                    (self.height, self.width),
+                )
+                mapped_coordinates[component_a_index] = coordinates_a
+            coordinates_b = mapped_coordinates.get(component_b_index)
+            if coordinates_b is None:
+                coordinates_b = component_site_coordinates(
+                    component_b,
+                    sequence_b,
+                    (self.height, self.width),
+                )
+                mapped_coordinates[component_b_index] = coordinates_b
             for site_interaction in chemistry.sites:
                 effect = site_interaction_to_effect(
                     site_interaction,
@@ -467,6 +499,9 @@ class RNAChemistryEngine:
                     interaction_radius=self.config.interaction_radius,
                     effect_padding=self.config.effect_padding,
                     spatialize_sites=self.config.spatialize_sites,
+                    encounter_zone=encounter_zone,
+                    mapped_coordinates_a=coordinates_a,
+                    mapped_coordinates_b=coordinates_b,
                 )
                 active = ActiveSite(chemistry.pair_key, chemistry, effect, zone)
                 active_sites.append(active)
