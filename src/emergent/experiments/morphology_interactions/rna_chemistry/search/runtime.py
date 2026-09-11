@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pickle
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import jax
 import jax.numpy as jnp
@@ -254,6 +254,31 @@ def morphology_state_bytes(counts: Mapping[ShapeKey, int]) -> bytes:
         )
     )
     return pickle.dumps(ordered, protocol=5)
+
+
+@dataclass
+class MorphologyProgress:
+    """Explicit search heuristic, not a proof that the world is terminal.
+
+    Progress means a previously unseen shape or a new peak number of copies
+    of a known shape. Translating/oscillating populations can be pruned by
+    this policy. The window counts analyzed generations only.
+    """
+
+    window: int
+    peaks: dict[ShapeKey, int] = field(default_factory=dict)
+    idle: int = 0
+
+    def observe(self, counts: Mapping[ShapeKey, int]) -> bool:
+        if self.window <= 0:
+            return False
+        progress = False
+        for key, count in counts.items():
+            if count > self.peaks.get(key, 0):
+                self.peaks[key] = count
+                progress = True
+        self.idle = 0 if progress else self.idle + 1
+        return self.idle >= self.window
 
 
 @dataclass

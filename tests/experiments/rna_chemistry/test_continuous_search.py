@@ -174,7 +174,7 @@ def test_warmup_and_detection_phase_are_part_of_terminal_identity():
     assert state_bytes(engine, grid) == initial
 
 
-def test_search_evicts_exactly_unchanged_grid_during_warmup(tmp_path):
+def test_search_evicts_extinct_grid_during_warmup(tmp_path):
     args = parser().parse_args(
         [
             "--output-dir",
@@ -209,7 +209,7 @@ def test_search_evicts_exactly_unchanged_grid_during_warmup(tmp_path):
         for line in (tmp_path / "worker_000" / "events.jsonl").read_text().splitlines()
     ]
     terminal = next(event for event in events if event["event"] == "terminal")
-    assert terminal["reason"] == "unchanged"
+    assert terminal["reason"] == "extinct"
     assert terminal["unchanged_grid"] is True
     assert terminal["failure"] is True
 

@@ -32,6 +32,7 @@ from ..config import RNAExperimentConfig
 from ..engine import RNAChemistryEngine
 from .runtime import (
     ExactCycle,
+    MorphologyProgress,
     PreparedFields,
     grid_state_bytes,
     morphology_state_bytes,
@@ -261,6 +262,8 @@ def run_worker(args: argparse.Namespace) -> None:
             "pid": os.getpid(),
             "initialization": "independent seeded random soups; shared universe seed",
             "copy_events": "population growth leads, not confirmed lineage replication",
+            "stagnation_window": args.stagnation_window,
+            "stagnation_policy": "no new shape or peak copy count; heuristic search pruning",
             "trial_identity": "config_key + initial_state_key; duplicate test keys are skipped",
             "interesting_events": "first-seen exact shapes and chemistry pairs per worker/config",
         },
@@ -281,6 +284,7 @@ def run_worker(args: argparse.Namespace) -> None:
     cycles: list[ExactCycle] = []
     grid_cycles: list[ExactCycle] = []
     morphology_cycles: list[ExactCycle] = []
+    progress_trackers: list[MorphologyProgress] = []
     baselines: list[Counter[ShapeKey]] = []
     milestones: list[dict[ShapeKey, int]] = []
     trial_ids: list[int] = []
@@ -434,6 +438,7 @@ def run_worker(args: argparse.Namespace) -> None:
         baselines[slot] = initial_counts[slot]
         cached_components[slot] = initial_components[slot]
         morphology_cycles.append(ExactCycle(morphology_state_bytes(initial_counts[slot])))
+        progress_trackers.append(MorphologyProgress(args.stagnation_window))
     # The dense state remains on the JAX backend between transitions.  Host
     # copies are made only for ragged morphology/chemistry preparation,
     # archival, and exact-cycle bookkeeping.
@@ -448,6 +453,7 @@ def run_worker(args: argparse.Namespace) -> None:
     unchanged_evictions = 0
     grid_repeat_evictions = 0
     morphology_repeat_evictions = 0
+    stagnation_evictions = 0
     copy_leads = 0
     active_sites_total = 0
     interesting_shapes = 0
@@ -549,11 +555,12 @@ def run_worker(args: argparse.Namespace) -> None:
             "running": running,
             "ticks": tick,
             "completed_trials": completed,
-            "terminal_failures": completed,
+            "terminal_failures": completed - stagnation_evictions,
             "failed_trials": completed,
             "unchanged_evictions": unchanged_evictions,
             "grid_repeat_evictions": grid_repeat_evictions,
             "morphology_repeat_evictions": morphology_repeat_evictions,
+            "stagnation_evictions": stagnation_evictions,
             "started_trials": serial,
             "skipped_duplicate_starts": skipped_starts,
             "unique_trial_keys": len(seen_trial_keys),
@@ -676,8 +683,16 @@ def run_worker(args: argparse.Namespace) -> None:
                     else None
                 )
                 unchanged = bool(unchanged_flags[slot])
+                extinct = not np.any(following[slot])
+                search_stagnant = (
+                    progress_trackers[slot].observe(counts)
+                    if analysis_performed[slot]
+                    else False
+                )
                 if (
-                    unchanged
+                    extinct
+                    or search_stagnant
+                    or unchanged
                     or grid_period is not None
                     or morphology_period is not None
                     or period is not None
@@ -699,10 +714,22 @@ def run_worker(args: argparse.Namespace) -> None:
                             )
                         )
                     )
+                    if extinct:
+                        reason = "extinct"
+                    elif (
+                        search_stagnant and not unchanged
+                        and grid_period is None and period is None
+                        and morphology_period is None
+                    ):
+                        reason = "search_stagnation"
                     write_event(
                         {
                             "event": "terminal",
-                            "outcome": "failure",
+                            "outcome": (
+                                "search_pruned" if reason == "search_stagnation" else "failure"
+                            ),
+                            "prune_is_heuristic": reason == "search_stagnation",
+                            "idle_analysis_steps": progress_trackers[slot].idle,
                             "failure": True,
                             "trial": trial_ids[slot],
                             "slot": slot,
@@ -721,6 +748,8 @@ def run_worker(args: argparse.Namespace) -> None:
                         }
                     )
                     completed += 1
+                    if reason == "search_stagnation":
+                        stagnation_evictions += 1
                     if unchanged:
                         unchanged_evictions += 1
                     if grid_period is not None:
@@ -747,6 +776,7 @@ def run_worker(args: argparse.Namespace) -> None:
                     morphology_cycles[slot] = ExactCycle(
                         morphology_state_bytes(baselines[slot])
                     )
+                    progress_trackers[slot] = MorphologyProgress(args.stagnation_window)
                     current = current.at[slot].set(jnp.asarray(replacement_grid, dtype=jnp.uint8))
                     live_grids[slot] = replacement_grid
                 else:
@@ -787,7 +817,8 @@ def run_worker(args: argparse.Namespace) -> None:
             {
                 "ticks": tick,
                 "completed_trials": completed,
-                "terminal_failures": completed,
+                "terminal_failures": completed - stagnation_evictions,
+                "stagnation_evictions": stagnation_evictions,
                 "unchanged_evictions": unchanged_evictions,
                 "grid_repeat_evictions": grid_repeat_evictions,
                 "morphology_repeat_evictions": morphology_repeat_evictions,
@@ -815,6 +846,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--detect-every", type=int, default=1)
     result.add_argument("--trace-chunk", type=int, default=4)
     result.add_argument("--cache-limit", type=int, default=4096)
+    result.add_argument(
+        "--stagnation-window", type=int, default=0,
+        help="prune after this many analyses without a new shape/peak copy count; 0 disables",
+    )
     result.add_argument(
         "--strategy-schedule",
         choices=("fixed", "rotating"),
@@ -876,6 +911,8 @@ def main() -> None:
             raise ValueError(f"{name} must be positive")
     if args.max_ticks is not None and args.max_ticks < 1:
         raise ValueError("max_ticks must be positive when supplied")
+    if args.stagnation_window < 0:
+        raise ValueError("stagnation_window must be non-negative")
     if args.worker_id is not None:
         run_worker(args)
         return

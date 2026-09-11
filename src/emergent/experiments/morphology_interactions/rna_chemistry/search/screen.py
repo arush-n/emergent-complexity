@@ -105,15 +105,19 @@ def screen_batch(
                 "confirmed_replicator": False,
             })
     active = list(range(len(engines)))
+    components_cache = [None for _ in engines]
     for _ in range(steps):
         if not active:
             break
         batch_engines = [engines[i] for i in active]
-        prepared = prepare_batch(batch_engines, np.stack([grids[i] for i in active]))
+        prepared = prepare_batch(
+            batch_engines, np.stack([grids[i] for i in active]),
+            components_by_environment=[components_cache[i] for i in active],
+        )
         following = np.asarray(step_fields(
             np.stack([grids[i] for i in active]), np.stack([p.rules for p in prepared]),
         ))
-        counts, _ = shape_counts_and_components_batch(
+        counts, components = shape_counts_and_components_batch(
             following, [e.config for e in batch_engines], batch_engines,
         )
         continuing = []
@@ -121,6 +125,7 @@ def screen_batch(
             engine, report, key = engines[index], rows[index], targets[index]
             engine.generation += 1
             grids[index] = following[local]
+            components_cache[index] = components[local]
             report["steps_executed"] = engine.generation
             copies = counts[local].get(key, 0)
             if copies > report["max_copies"]:

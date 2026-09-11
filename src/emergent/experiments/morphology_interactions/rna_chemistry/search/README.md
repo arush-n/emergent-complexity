@@ -42,7 +42,19 @@ soup, so partners and potential feedstock can already be present. This is a
 raw sampling search, not an evolutionary optimizer or a claim of autonomous
 replication in isolation.
 
-## Exact termination
+## Termination and search pruning
+
+For throughput-oriented discovery, `--stagnation-window 64` also recycles a
+world after 64 analyzed generations without a new exact morphology or a new
+peak copy count of an existing morphology. New shapes or higher counts reset
+the window. Warmup and skipped detection steps do not consume it. The default
+`0` disables this policy; worlds making progress have no maximum age.
+
+These events have reason `search_stagnation`, outcome `search_pruned`, and
+`prune_is_heuristic: true`. They may include translating organisms and delayed
+reproducers, so compare against unpruned runs when interpreting results.
+`stagnation_evictions` is recorded separately from `terminal_failures`; every
+replacement retains the old trial's exact trace and receives a new test key.
 
 The runner keeps exact Brent detectors for dense-grid and full-chemistry-state
 cycles. A morphology-multiset detector remains available as an opt-in diagnostic
@@ -57,10 +69,10 @@ worlds are recorded separately. An
 `--max-ticks` option exists for benchmarks only: it interrupts the worker and
 does **not** classify remaining worlds as terminal. Normal runs omit it.
 
-Unchanged-grid eviction is exact: consecutive dense grid states are compared
-with a JAX predicate. There is no low-activity threshold or arbitrary
-stagnation window. A world that keeps changing without an exact dense-grid or
-full-state recurrence remains active.
+Unchanged-grid eviction compares consecutive dense grids exactly. With
+`--stagnation-window 0`, a changing world without a detected recurrence remains
+active. Enabling the progress window adds the explicitly heuristic pruning
+policy described above; it does not change the cellular chemistry.
 
 ## Trace and evidence
 
