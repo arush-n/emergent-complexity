@@ -111,6 +111,33 @@ The manifest records the active JAX backend and devices. If the environment
 does not provide a Metal JAX plugin, JAX will report `cpu`; install and select
 that backend separately before attributing a speed change to GPU execution.
 
+## Screening growth leads
+
+Use the isolation assay before promoting population-count alerts to replication
+candidates. It deduplicates exact shapes, selects larger leads, preserves their
+source worker/trial/trace tick, and runs each candidate under four matched
+conditions in JAX batches: native Conway and RNA alpha 0, 0.5, and 1.
+
+```bash
+.venv/bin/python -m emergent.experiments.morphology_interactions.rna_chemistry.search.screen \
+  artifacts/experiments/morphology_interactions/rna_chemistry/search/continuous \
+  --output-dir artifacts/experiments/morphology_interactions/rna_chemistry/search/isolation \
+  --candidates 24 --batch-size 4 --size 64 --steps 128
+```
+
+Each assay starts from one centered copy with zero warmup and no surrounding
+soup. Complete chemistry-state recurrence prunes finished assays; remaining
+assays at `--steps` are inconclusive. This diagnostic horizon does not impose
+an age limit on continuous discovery worlds. `screen.jsonl` records each
+condition, exact-copy counts, purity, termination, and source trace location.
+
+A positive isolation result still needs daughter-transfer and repeated-lineage
+tests. A negative result does not rule out reproduction requiring partners or
+feedstock. A single connected organism has no pair interaction until it splits
+or encounters another component; compare ecological and isolated assays before
+concluding that its chemistry cannot support reproduction. Selection of the
+largest observed leads is deliberately targeted, not an unbiased alpha sweep.
+
 ```bash
 .venv/bin/python -m emergent.experiments.morphology_interactions.rna_chemistry.search.replay \
   artifacts/experiments/morphology_interactions/rna_chemistry/search/continuous/worker_000

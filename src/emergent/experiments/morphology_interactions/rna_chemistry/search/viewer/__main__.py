@@ -32,6 +32,7 @@ def main():
                         int(values.get("worker", ["0"])[0]),
                         int(values.get("slot", ["0"])[0]),
                         int(values["tick"][0]) if "tick" in values else None,
+                        live_only="tick" not in values,
                     )
                     payload, content_type = json.dumps(data).encode(), "application/json"
                 else:

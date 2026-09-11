@@ -447,6 +447,8 @@ class RNAChemistryEngine:
             second = observations[second_index]
             chemistry = self._pair_chemistry(first, second)
             pair_chemistries[chemistry.pair_key] = chemistry
+            if not chemistry.sites:
+                continue
             if shape_key_sort_key(first[1]) <= shape_key_sort_key(second[1]):
                 component_a, sequence_a = first[0], first[2]
                 component_b, sequence_b = second[0], second[2]

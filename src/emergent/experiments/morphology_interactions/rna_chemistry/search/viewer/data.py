@@ -306,7 +306,9 @@ class TraceReader:
             self.overview_time = now
             return self.overview_cache
 
-    def frames(self, worker_id: int, slot: int, tick: int | None = None) -> dict:
+    def frames(
+        self, worker_id: int, slot: int, tick: int | None = None, *, live_only: bool = False
+    ) -> dict:
         with self.lock:
             worker = self.worker(worker_id)
             paths = sorted(worker.glob("trace_*.npz"))
@@ -335,14 +337,24 @@ class TraceReader:
                     "effect_cells": None,
                     "live": True,
                 }
-            if not paths:
+            if not paths or (live_only and live_frame is not None):
                 if live_frame is None:
                     raise ValueError("waiting for the first live snapshot or flushed trace")
+                max_tick = 0
+                if paths:
+                    # NPZ members load lazily: metadata is tiny; the dense
+                    # rule arrays and archived grids stay on disk.
+                    with np.load(paths[-1], allow_pickle=False) as metadata:
+                        trials = metadata["trials"]
+                        max_tick = int(paths[-1].stem.split("_")[1]) + len(trials) - 1
+                        live_frame["trace_trial"] = int(trials[-1, slot])
+                    live_frame["trace_tick"] = max_tick
+                    live_frame["archive_lag_ticks"] = live_frame["tick"] - max_tick
                 return {
                     "frames": [],
                     "height": live_grids.shape[1],
                     "width": live_grids.shape[2],
-                    "max_tick": live_frame["tick"],
+                    "max_tick": max_tick,
                     "worker": worker_id,
                     "slot": slot,
                     "live_frame": live_frame,

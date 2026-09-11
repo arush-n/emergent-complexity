@@ -133,3 +133,15 @@ def test_reader_prefers_current_live_snapshot_over_stale_trace(tmp_path):
     assert frames["live_frame"]["tick"] == 43
     assert frames["live_frame"]["after"] == packed(live[0])
     assert frames["live_frame"]["trace_trial"] == 11
+
+    def reject_archive_load(_path):
+        raise AssertionError("live polling must not decode archived rule arrays")
+
+    reader.load = reject_archive_load
+    live_only = reader.frames(0, 0, live_only=True)
+    assert live_only["frames"] == []
+    assert live_only["live_frame"]["trial"] == 12
+    assert live_only["live_frame"]["after"] == packed(live[0])
+    assert live_only["max_tick"] == 0
+    assert live_only["live_frame"]["trace_trial"] == 11
+    assert live_only["live_frame"]["archive_lag_ticks"] == 43
