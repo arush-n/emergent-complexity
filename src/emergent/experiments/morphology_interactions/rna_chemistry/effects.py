@@ -268,10 +268,13 @@ def site_effect_zone(
     offsets = _dilation_offsets(radius)
     rows = (anchor_rows[valid, None] + offsets[None, :, 0]).reshape(-1) % int(grid_shape[0])
     cols = (anchor_cols[valid, None] + offsets[None, :, 1]).reshape(-1) % int(grid_shape[1])
+    inside_encounter = encounter_zone[rows, cols]
+    if not np.any(inside_encounter):
+        return encounter_zone
     localized = np.zeros(grid_shape, dtype=bool)
-    localized[rows, cols] = True
-    localized &= encounter_zone
-    return localized if np.any(localized) else encounter_zone
+    localized[rows[inside_encounter], cols[inside_encounter]] = True
+    localized.setflags(write=False)
+    return localized
 
 
 def resolve_site_owner_map(
@@ -303,11 +306,17 @@ def resolve_site_owner_map(
     zone_by_key = {effect.sort_key: merged[effect.sort_key][1] for effect in ordered}
     owner_map = np.full((height, width), -1, dtype=np.int32)
     best_strength = np.full((height, width), -np.inf, dtype=np.float32)
+    flat_owner = owner_map.reshape(-1)
+    flat_strength = best_strength.reshape(-1)
     for index, effect in enumerate(ordered):
         zone = zone_by_key[effect.sort_key]
-        replace = zone & (float(effect.strength) > best_strength)
-        owner_map[replace] = index
-        best_strength[replace] = float(effect.strength)
+        flat_indices = np.flatnonzero(zone)
+        if flat_indices.size == 0:
+            continue
+        replace = float(effect.strength) > flat_strength[flat_indices]
+        selected = flat_indices[replace]
+        flat_owner[selected] = index
+        flat_strength[selected] = float(effect.strength)
     return owner_map, ordered
 
 
