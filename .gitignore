@@ -10,6 +10,7 @@ __pycache__/
 coverage.xml
 htmlcov/
 .venv/
+.venv-metal/
 venv/
 env/
 ENV/
@@ -18,6 +19,9 @@ build/
 pip-wheel-metadata/
 
 # Generated experiment data and dense array exports
+# Exploratory morphology/RNA work remains local until research validation.
+/src/emergent/experiments/morphology_interactions/
+/tests/experiments/
 artifacts/
 results/
 outputs/

@@ -2,10 +2,9 @@
 
 This repository is a small, reproducible cellular-automata laboratory. It provides a JAX simulation engine for Conway's Game of Life, arbitrary binary outer-totalistic `B/S` rules, keyed random initialization and rule generation, batched execution, trajectories, a thin FastAPI server, and a browser interface with 2D, 3D, comparison, and experiment modes.
 
-The normal simulator stays focused on deterministic CA execution. Research
-analysis and automated search live in explicitly isolated experiment packages;
-the morphology-interactions package includes a native-Life self-replication
-probe without changing simulator or server semantics.
+The normal simulator stays focused on deterministic CA execution. Included
+experiment utilities support reproducible sampling and comparisons; they do
+not establish spontaneous self-replication or biological mechanisms.
 
 Live demo: <https://arush-n.github.io/emergent-complexity/>
 
@@ -142,7 +141,7 @@ python -m emergent.experiments.compare_dimensions \
 ```text
 src/emergent/core/        pure JAX 2D grids, rules, transitions, scans, PRNG, measurements
 src/emergent/core3d/      pure JAX 3D grids, 26-neighbor rules, scans, batching, PRNG
-src/emergent/experiments/ small sampling, raw rule sweeps, dimension comparisons, and the isolated morphology-interactions experiment
+src/emergent/experiments/ sampling, raw rule sweeps, and dimension comparisons
 src/emergent/io/          2D/3D patterns plus JSON/NPY/NPZ persistence
 src/emergent/server/      FastAPI assembly, dimension-specific routers, and sessions
 frontend/                 static HTML/CSS/JS UI, SVG diagnostics, Canvas, and WebGL voxel view
@@ -153,12 +152,7 @@ benchmarks/               engine and server/browser pipeline benchmarks
 ```
 
 More focused notes live in [`docs/`](docs/): architecture, rules, experiments,
-benchmarks, frontend behavior, deployment, and reproducibility. The detailed
-morphology-interactions design and benchmark notes remain next to that
-experiment under
-[`src/emergent/experiments/morphology_interactions/docs/`](src/emergent/experiments/morphology_interactions/docs/).
-Its optional native-Life replicator search is documented in
-[`docs/replicator_search.md`](src/emergent/experiments/morphology_interactions/docs/replicator_search.md).
+benchmarks, frontend behavior, deployment, and reproducibility.
 
 For new code, use `emergent.core` for the 2D API and `emergent.core3d` for the
 3D API. The `emergent.rules`, `emergent.random`, `emergent.simulate`,
